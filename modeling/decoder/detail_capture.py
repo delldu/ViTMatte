@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+import pdb
 
 class Basic_Conv3x3(nn.Module):
     """
@@ -128,10 +129,43 @@ class Detail_Capture(nn.Module):
         self.matting_head = Matting_Head(
             in_chans = fusion_out[-1],
         )
+        # (Pdb) self.fusion_blks
+        # ModuleList(
+        #   (0): Fusion_Block(
+        #     (conv): Basic_Conv3x3(
+        #       (conv): Conv2d(576, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        #       (bn): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        #       (relu): ReLU(inplace=True)
+        #     )
+        #   )
+        #   (1): Fusion_Block(
+        #     (conv): Basic_Conv3x3(
+        #       (conv): Conv2d(352, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        #       (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        #       (relu): ReLU(inplace=True)
+        #     )
+        #   )
+        #   (2): Fusion_Block(
+        #     (conv): Basic_Conv3x3(
+        #       (conv): Conv2d(176, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        #       (bn): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        #       (relu): ReLU(inplace=True)
+        #     )
+        #   )
+        #   (3): Fusion_Block(
+        #     (conv): Basic_Conv3x3(
+        #       (conv): Conv2d(68, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        #       (bn): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        #       (relu): ReLU(inplace=True)
+        #     )
+        #   )
+        # )
+
+
 
     def forward(self, features, images):
         detail_features = self.convstream(images)
-        for i in range(len(self.fusion_blks)):
+        for i in range(len(self.fusion_blks)): # len(self.fusion_blks) -- 4
             d_name_ = 'D'+str(len(self.fusion_blks)-i-1)
             features = self.fusion_blks[i](features, detail_features[d_name_])
         

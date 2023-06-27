@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pdb
 
 __all__ = [
     "window_partition",
@@ -24,6 +25,7 @@ def window_partition(x, window_size):
         windows: windows after partition with [B * num_windows, window_size, window_size, C].
         (Hp, Wp): padded height and width before partition
     """
+    # window_size = 14
     B, H, W, C = x.shape
 
     pad_h = (window_size - H % window_size) % window_size
@@ -34,6 +36,10 @@ def window_partition(x, window_size):
 
     x = x.view(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
     windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
+
+    # windows.size() -- [54, 14, 14, 384]
+    # (Hp, Wp) -- (126, 84)
+
     return windows, (Hp, Wp)
 
 
@@ -49,6 +55,8 @@ def window_unpartition(windows, window_size, pad_hw, hw):
     Returns:
         x: unpartitioned sequences with [B, H, W, C].
     """
+    # windows.size(), window_size, pad_hw, hw
+    # ([54, 14, 14, 384], 14, (126, 84), (120, 80))
     Hp, Wp = pad_hw
     H, W = hw
     B = windows.shape[0] // (Hp * Wp // window_size // window_size)
@@ -57,6 +65,9 @@ def window_unpartition(windows, window_size, pad_hw, hw):
 
     if Hp > H or Wp > W:
         x = x[:, :H, :W, :].contiguous()
+
+    # x.size() -- [1, 120, 80, 384]
+
     return x
 
 
@@ -72,9 +83,13 @@ def get_rel_pos(q_size, k_size, rel_pos):
     Returns:
         Extracted positional embeddings according to relative positions.
     """
-    max_rel_dist = int(2 * max(q_size, k_size) - 1)
+    # q_size = 14
+    # k_size = 14
+    # rel_pos.size() -- [27, 64]
+
+    max_rel_dist = int(2 * max(q_size, k_size) - 1) # ==> 27
     # Interpolate rel pos if needed.
-    if rel_pos.shape[0] != max_rel_dist:
+    if rel_pos.shape[0] != max_rel_dist: # False
         # Interpolate rel pos.
         rel_pos_resized = F.interpolate(
             rel_pos.reshape(1, rel_pos.shape[0], -1).permute(0, 2, 1),
@@ -122,6 +137,8 @@ def add_decomposed_rel_pos(attn, q, rel_pos_h, rel_pos_w, q_size, k_size):
         attn.view(B, q_h, q_w, k_h, k_w) + rel_h[:, :, :, :, None] + rel_w[:, :, :, None, :]
     ).view(B, q_h * q_w, k_h * k_w)
 
+    # attn.size() -- [324, 196, 196]
+
     return attn
 
 
@@ -137,21 +154,24 @@ def get_abs_pos(abs_pos, has_cls_token, hw):
     Returns:
         Absolute positional embeddings after processing with shape (1, H, W, C)
     """
+    # abs_pos.size() -- [1, 196, 384]
+    # has_cls_token = True
+    # hw -- (120, 80)
+
     h, w = hw
     if has_cls_token:
         abs_pos = abs_pos[:, 1:]
-    xy_num = abs_pos.shape[1]
+    xy_num = abs_pos.shape[1] # 196
     size = int(math.sqrt(xy_num))
     assert size * size == xy_num
 
-    if size != h or size != w:
+    if size != h or size != w: # ==> True
         new_abs_pos = F.interpolate(
             abs_pos.reshape(1, size, size, -1).permute(0, 3, 1, 2),
             size=(h, w),
             mode="bicubic",
             align_corners=False,
         )
-
         return new_abs_pos.permute(0, 2, 3, 1)
     else:
         return abs_pos.reshape(1, h, w, -1)
@@ -174,6 +194,8 @@ class PatchEmbed(nn.Module):
             embed_dim (int):  embed_dim (int): Patch embedding dimension.
         """
         super().__init__()
+        # in_chans = 4
+        # embed_dim = 384
 
         self.proj = nn.Conv2d(
             in_chans, embed_dim, kernel_size=kernel_size, stride=stride, padding=padding
@@ -183,4 +205,6 @@ class PatchEmbed(nn.Module):
         x = self.proj(x)
         # B C H W -> B H W C
         x = x.permute(0, 2, 3, 1)
+
         return x
+

@@ -1,10 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torchvision
-import os
+import pdb
 
-from detectron2.structures import ImageList
 
 class ViTMatte(nn.Module):
     def __init__(self,
@@ -18,28 +15,36 @@ class ViTMatte(nn.Module):
                  decoder,
                  ):
         super(ViTMatte, self).__init__()
-        self.backbone = backbone
+        # input_format = 'RGB'
+        # pixel_mean = [0.485, 0.456, 0.406]
+        # pixel_std = [0.229, 0.22399999999999998, 0.225]
+        # size_divisibility = 32
+
+        self.backbone = backbone # ViT(...)
         self.criterion = criterion
         self.input_format = input_format
         self.size_divisibility = size_divisibility
-        self.decoder = decoder
-        self.register_buffer(
-            "pixel_mean", torch.tensor(pixel_mean).view(-1, 1, 1), False
-        )
+        self.decoder = decoder # Detail_Capture(...)
+        self.register_buffer("pixel_mean", torch.tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.tensor(pixel_std).view(-1, 1, 1), False)
         assert (
             self.pixel_mean.shape == self.pixel_std.shape
         ), f"{self.pixel_mean} and {self.pixel_std} have different shapes!"
-    
+
     @property
     def device(self):
         return self.pixel_mean.device
 
     def forward(self, batched_inputs):
+        # batched_inputs.keys() -- dict_keys(['image', 'trimap'])
         images, targets, H, W = self.preprocess_inputs(batched_inputs)
+        # images.size() -- [1, 4, 672, 992]
+        # targets -- {'phas': None}
 
-        features = self.backbone(images)
+        features = self.backbone(images) # features.size() -- [1, 384, 42, 62]
         outputs = self.decoder(features, images)  
+        # outputs.keys() -- dict_keys(['phas'])
+        # outputs['phas'].size() -- [1, 1, 672, 992]
 
         if self.training:
             assert targets is not None
@@ -52,14 +57,15 @@ class ViTMatte(nn.Module):
             outputs['phas'] = outputs['phas'][:,:,:H,:W]
             return outputs
 
-
-
     def preprocess_inputs(self, batched_inputs):
         """
         Normalize, pad and batch the input images.
         """
         images = batched_inputs["image"].to(self.device)
         trimap = batched_inputs['trimap'].to(self.device)
+        # trimap = torch.ones_like(images)[:, 0:1, :, :] # xxxx8888
+        # trimap[trimap == 1.0] = 0.8
+
         images = (images - self.pixel_mean) / self.pixel_std
 
         if 'fg' in batched_inputs.keys():
