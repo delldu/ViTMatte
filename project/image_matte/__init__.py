@@ -13,12 +13,50 @@ __version__ = "1.0.0"
 
 import os
 from tqdm import tqdm
+
 import torch
+import torch.nn as nn
 
 import todos
-from . import vitmatte
+from . import isnetdis, vitmatte
 
 import pdb
+
+
+class ImageMatte(nn.Module):
+    def __init__(self):
+        super(ImageMatte, self).__init__()
+        # from VitMatte model limition
+        # self.MAX_H = 1024
+        # self.MAX_W = 1024
+        # self.MAX_TIMES = 32
+
+        # self.isnet_dis = todos.model.ResizePadModel(isnetdis.ISNetDIS())
+        self.isnet_dis = isnetdis.ISNetDIS()
+        self.vit_matte = todos.model.ResizePadModel(vitmatte.ViTMatte())
+
+    def forward(self, x):
+        B, C, H, W = x.size()
+
+        images = x[:, 0:3, :, :]
+        trimap = x[:, 3:4, :, :]
+
+        # Unkown area exist ?
+        fg_area = (trimap >= 0.9).to(torch.float32).sum().item()
+        bg_area = (trimap <= 0.1).to(torch.float32).sum().item()
+        unkown_area_ratio = 1.0  - (fg_area + bg_area)/(B * H *W)
+
+        # print("area: ", 1.0 * B * H * W)
+        # print("fg_area: ", fg_area)
+        # print("bg_area: ", bg_area)
+        # print("unkown_area_ratio: ", unkown_area_ratio)
+
+        if unkown_area_ratio < 0.05:
+            # unkown seems not exist, Create trimap by ISNetDIS
+            x = self.isnet_dis(images)
+
+        # Create matte by VitMatte
+        return self.vit_matte(x)
 
 
 def get_tvm_model():
@@ -26,7 +64,8 @@ def get_tvm_model():
     TVM model base on torch.jit.trace
     """
 
-    model = vitmatte.ViTMatte()
+    model = ImageMatte()
+    # model = todos.model.ResizePadModel(model)
     device = todos.model.get_device()
     model = model.to(device)
     model.eval()
@@ -37,14 +76,15 @@ def get_tvm_model():
 
 def get_matte_model():
     """Create model."""
-    model = vitmatte.ViTMatte()
-    model = todos.model.ResizePadModel(model)
+
+    model = ImageMatte()
+    # model = todos.model.ResizePadModel(model)
     device = todos.model.get_device()
     model = model.to(device)
     model.eval()
 
     print(f"Running model on {device} ...")
-    print(model)
+    # print(model)
     
     model = torch.jit.script(model)
     todos.data.mkdir("output")
@@ -76,5 +116,7 @@ def image_matte_predict(input_files, output_dir):
         predict_tensor = todos.model.forward(model, device, input_tensor)
         output_file = f"{output_dir}/{os.path.basename(filename)}"
 
-        todos.data.save_tensor([predict_tensor], output_file)
+        input_tensor[:, 3:4, :, :] = 1.0
+
+        todos.data.save_tensor([input_tensor, predict_tensor], output_file)
     todos.model.reset_device()

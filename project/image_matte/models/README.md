@@ -1,3 +1,4 @@
-64cffda7b7abb3b836ed075651e03607  image_matte.pth
+3374c35acf6e4c3fd5952883b401d70a  isnetdis.pth
+64cffda7b7abb3b836ed075651e03607  vitmatte.pth
 3571a0c4569e273bb65cbff2e84d0ab4  ViTMatte_S_Com.pth
 64cffda7b7abb3b836ed075651e03607  ViTMatte_S_DIS.pth

@@ -1,3 +1,15 @@
+"""Create model."""
+# coding=utf-8
+#
+# /************************************************************************************
+# ***
+# ***    Copyright 2023 Dell(18588220928@163.com), All Rights Reserved.
+# ***
+# ***    File Author: Dell, Wed 28 Jun 2023 05:46:59 PM CST
+# ***
+# ************************************************************************************/
+#
+
 import os
 import math
 import torch
@@ -792,7 +804,7 @@ class Detail_Capture(nn.Module):
         # )
 
 
-    def forward(self, features, images) -> Dict[str, torch.Tensor]:
+    def forward(self, features, images):
         detail_features = self.convstream(images)
 
         # torch.jit.script NOT SUPPORT
@@ -804,10 +816,7 @@ class Detail_Capture(nn.Module):
             d_name_ = 'D'+str(len(self.fusion_blks)-i-1)
             features = m(features, detail_features[d_name_])
         
-        phas = torch.sigmoid(self.matting_head(features))
-
-        return {'phas': phas}
-
+        return torch.sigmoid(self.matting_head(features))
 
 
 # --------------------------------------------------------------------------------------------------
@@ -817,7 +826,6 @@ class ViTMatte(nn.Module):
         self.MAX_H = 1024
         self.MAX_W = 1024
         self.MAX_TIMES = 32
-        # GPU: 2G, 45ms
 
         self.backbone = ViT()
         self.decoder = Detail_Capture()
@@ -825,17 +833,18 @@ class ViTMatte(nn.Module):
 
         self.load_weights()
 
-    def load_weights(self, model_path="models/image_matte.pth"):
+    def load_weights(self, model_path="models/vitmatte.pth"):
         cdir = os.path.dirname(__file__)
         checkpoint = model_path if cdir == "" else cdir + "/" + model_path
         self.load_state_dict(torch.load(checkpoint))
 
 
     def forward(self, x):
+        '''
+            x is Bx4xHxW tensor, alpha channel of x is trimap
+        '''
         # x.size() -- [1, 4, 672, 992]
         B, C, H, W = x.size()
-
-        # hx = F.interpolate(x, size=(1024, 1024), mode="bilinear", align_corners=False)
 
         # normalize
         images = x[:, 0:3, :, :]
@@ -844,13 +853,7 @@ class ViTMatte(nn.Module):
 
         images = torch.cat((images, trimap), dim=1)
         features = self.backbone(images) # features.size() -- [1, 384, 42, 62]
-        outputs = self.decoder(features, images)  
-        # outputs['phas'].size() -- [1, 1, 672, 992]
-        mask = outputs['phas']
+        mask = self.decoder(features, images)  # mask.size() -- [1, 1, 672, 992]
 
-        # mask = F.interpolate(mask, size=(H, W), mode="bilinear", align_corners=True)
-        # x[:, 3:4, :, :] = mask
-
-        # return x
         return torch.cat((x[:, 0:3, :, :], mask), dim=1)
 

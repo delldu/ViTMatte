@@ -3,7 +3,7 @@
 #
 # /************************************************************************************
 # ***
-# ***    Copyright 2020-2022 Dell(18588220928@163.com), All Rights Reserved.
+# ***    Copyright 2020-2023 Dell(18588220928@163.com), All Rights Reserved.
 # ***
 # ***    File Author: Dell, 2020年 09月 09日 星期三 23:56:45 CST
 # ***
@@ -320,6 +320,10 @@ class RSU4F(nn.Module):
 
 
 class ISNetDIS(nn.Module):
+    '''
+    IS -- intermediate supervision
+    DIS -- Dichotomous Image Segmentation
+    '''
     def __init__(self, in_ch=3, out_ch=1):
         super(ISNetDIS, self).__init__()
         self.MAX_H = 1024
@@ -363,12 +367,16 @@ class ISNetDIS(nn.Module):
 
         self.load_weights()
 
-    def load_weights(self, model_path="models/image_matte.pth"):
+    def load_weights(self, model_path="models/isnetdis.pth"):
         cdir = os.path.dirname(__file__)
         checkpoint = model_path if cdir == "" else cdir + "/" + model_path
         self.load_state_dict(torch.load(checkpoint))
 
     def forward(self, x):
+        '''
+            Create trimap for x, x is Bx3xHxW Tensor
+        '''
+
         B, C, H, W = x.size()
         hx = x
 
@@ -436,12 +444,10 @@ class ISNetDIS(nn.Module):
         # d6 = self.side6(hx6)
         # d6 = upsample_like(d6,x)
 
-        # return [F.sigmoid(d1), F.sigmoid(d2), F.sigmoid(d3), F.sigmoid(d4), F.sigmoid(d5), F.sigmoid(d6)],[hx1d,hx2d,hx3d,hx4d,hx5d,hx6]
-
         d = torch.sigmoid(d1)
         ma = torch.max(d)
         mi = torch.min(d)
-        mask = (d - mi) / (ma - mi + 1e-8)
+        mask = (d - mi) / (ma - mi + 1e-5)
         mask = F.interpolate(mask, size=(H, W), mode="bilinear", align_corners=True)
 
         # Create trimap
@@ -451,4 +457,4 @@ class ISNetDIS(nn.Module):
         mask[bg] = 0.0
         mask[fg] = 1.0
 
-        return torch.cat((x, mask), dim=1)
+        return torch.cat((x[:, 0:3, :, :], mask), dim = 1)
