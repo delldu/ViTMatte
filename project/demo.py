@@ -12,3 +12,5 @@
 import image_matte
 
 image_matte.image_matte_predict("images/*.png", "output")
+# image_matte.image_matte_predict("images/color/*.png", "output/color")
+# image_matte.image_matte_predict("images/grey/*.jpg", "output/grey")

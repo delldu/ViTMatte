@@ -19,34 +19,25 @@ import pdb
 
 class REBNCONV(nn.Module):
     def __init__(self, in_ch=3, out_ch=3, dirate=1, stride=1):
-        super(REBNCONV, self).__init__()
+        super().__init__()
 
         self.conv_s1 = nn.Conv2d(in_ch, out_ch, 3, padding=1 * dirate, dilation=1 * dirate, stride=stride)
         self.bn_s1 = nn.BatchNorm2d(out_ch)
-        self.relu_s1 = nn.ReLU(inplace=True)
+        self.relu_s1 = nn.ReLU()
 
     def forward(self, x):
-        hx = x
-        xout = self.relu_s1(self.bn_s1(self.conv_s1(hx)))
-
-        return xout
+        return self.relu_s1(self.bn_s1(self.conv_s1(x)))
 
 
 ## upsample tensor 'src' to have the same spatial size with tensor 'tar'
 def upsample_like(src, tar):
-    # return F.upsample(src,size=tar.shape[2:],mode='bilinear')
     return F.interpolate(src, size=tar.shape[2:], mode="bilinear", align_corners=True)
 
 
 ### RSU-7 ###
 class RSU7(nn.Module):
     def __init__(self, in_ch=3, mid_ch=12, out_ch=3, img_size=512):
-        super(RSU7, self).__init__()
-
-        self.in_ch = in_ch
-        self.mid_ch = mid_ch
-        self.out_ch = out_ch
-
+        super().__init__()
         self.rebnconvin = REBNCONV(in_ch, out_ch, dirate=1)  ## 1 -> 1/2
 
         self.rebnconv1 = REBNCONV(out_ch, mid_ch, dirate=1)
@@ -121,7 +112,7 @@ class RSU7(nn.Module):
 ### RSU-6 ###
 class RSU6(nn.Module):
     def __init__(self, in_ch=3, mid_ch=12, out_ch=3):
-        super(RSU6, self).__init__()
+        super().__init__()
 
         self.rebnconvin = REBNCONV(in_ch, out_ch, dirate=1)
 
@@ -188,7 +179,7 @@ class RSU6(nn.Module):
 ### RSU-5 ###
 class RSU5(nn.Module):
     def __init__(self, in_ch=3, mid_ch=12, out_ch=3):
-        super(RSU5, self).__init__()
+        super().__init__()
 
         self.rebnconvin = REBNCONV(in_ch, out_ch, dirate=1)
 
@@ -245,7 +236,7 @@ class RSU5(nn.Module):
 ### RSU-4 ###
 class RSU4(nn.Module):
     def __init__(self, in_ch=3, mid_ch=12, out_ch=3):
-        super(RSU4, self).__init__()
+        super().__init__()
         self.rebnconvin = REBNCONV(in_ch, out_ch, dirate=1)
 
         self.rebnconv1 = REBNCONV(out_ch, mid_ch, dirate=1)
@@ -287,7 +278,7 @@ class RSU4(nn.Module):
 ### RSU-4F ###
 class RSU4F(nn.Module):
     def __init__(self, in_ch=3, mid_ch=12, out_ch=3):
-        super(RSU4F, self).__init__()
+        super().__init__()
 
         self.rebnconvin = REBNCONV(in_ch, out_ch, dirate=1)
 
@@ -321,16 +312,15 @@ class RSU4F(nn.Module):
 
 class ISNetDIS(nn.Module):
     '''
-    IS -- intermediate supervision
+    IS -- Intermediate Supervision
     DIS -- Dichotomous Image Segmentation
     '''
     def __init__(self, in_ch=3, out_ch=1):
-        super(ISNetDIS, self).__init__()
+        super().__init__()
         self.MAX_H = 1024
         self.MAX_W = 1024
-        self.MAX_TIMES = 2
-        # GPU: 2G, 45ms
-
+        self.MAX_TIMES = 16
+        
         self.conv_in = nn.Conv2d(in_ch, 64, 3, stride=2, padding=1)
         self.pool_in = nn.MaxPool2d(2, stride=2, ceil_mode=True)
 
@@ -347,7 +337,7 @@ class ISNetDIS(nn.Module):
         self.pool45 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
 
         self.stage5 = RSU4F(512, 256, 512)
-        self.pool56 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
+        self.pool56 = nn.MaxPool2d(2, stride=2, ceil_mode=True) # onnx export ???
 
         self.stage6 = RSU4F(512, 256, 512)
 
@@ -376,7 +366,6 @@ class ISNetDIS(nn.Module):
         '''
             Create trimap for x, x is Bx3xHxW Tensor
         '''
-
         B, C, H, W = x.size()
         hx = x
 
@@ -384,7 +373,6 @@ class ISNetDIS(nn.Module):
         hx = F.interpolate(hx, size=(1024, 1024), mode="bilinear", align_corners=False)
 
         hxin = self.conv_in(hx)
-        # hx = self.pool_in(hxin)
 
         # stage 1
         hx1 = self.stage1(hxin)
@@ -431,16 +419,12 @@ class ISNetDIS(nn.Module):
 
         # d2 = self.side2(hx2d)
         # d2 = upsample_like(d2,x)
-
         # d3 = self.side3(hx3d)
         # d3 = upsample_like(d3,x)
-
         # d4 = self.side4(hx4d)
         # d4 = upsample_like(d4,x)
-
         # d5 = self.side5(hx5d)
         # d5 = upsample_like(d5,x)
-
         # d6 = self.side6(hx6)
         # d6 = upsample_like(d6,x)
 
@@ -451,10 +435,10 @@ class ISNetDIS(nn.Module):
         mask = F.interpolate(mask, size=(H, W), mode="bilinear", align_corners=True)
 
         # Create trimap
-        fg = mask >= 0.90 
+        fg = mask >= 0.90
         bg = mask <= 0.10
         mask[:] = 0.5 # unkown
         mask[bg] = 0.0
         mask[fg] = 1.0
 
-        return torch.cat((x[:, 0:3, :, :], mask), dim = 1)
+        return torch.cat((x[:, 0:3, :, :], mask), dim=1)
