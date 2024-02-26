@@ -26,13 +26,9 @@ def window_partition(x, window_size:int) -> Tuple[torch.Tensor, int, int]:
 
     pad_h = (window_size - H % window_size) % window_size
     pad_w = (window_size - W % window_size) % window_size
-    # xxxx_8888
-    if pad_h > 0 or pad_w > 0:
-        x = F.pad(x, (0, 0, 0, pad_w, 0, pad_h))
-    # x = F.pad(x, (0, 0, 0, pad_w, 0, pad_h))
+    x = F.pad(x, (0, 0, 0, pad_w, 0, pad_h))
 
     Hp, Wp = H + pad_h, W + pad_w
-
     x = x.view(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
     windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
 
@@ -50,13 +46,7 @@ def window_unpartition(windows, window_size:int, pad_hw:Tuple[int, int], hw:Tupl
     B = windows.shape[0] // (Hp * Wp // window_size // window_size)
     x = windows.view(B, Hp // window_size, Wp // window_size, window_size, window_size, -1)
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, Hp, Wp, -1)
-
-    # xxxx_8888
-    # if Hp > H or Wp > W:
-    #     x = x[:, :H, :W, :].contiguous()
-    x = x[:, :H, :W, :].contiguous()
-
-    # x.size() -- [1, 120, 80, 384]
+    x = x[:, :H, :W, :].contiguous() # x.size() -- [1, 120, 80, 384]
 
     return x
 
@@ -67,27 +57,14 @@ def get_rel_pos(q_size:int, k_size:int, rel_pos):
     # rel_pos.size() -- [27, 64]
 
     max_rel_dist = int(2 * max(q_size, k_size) - 1) # ==> 27
-    # Interpolate rel pos if needed.
-    # xxxx_8888
-    if rel_pos.shape[0] != max_rel_dist: # False
-        # Interpolate rel pos.
-        rel_pos_resized = F.interpolate(
-            rel_pos.reshape(1, rel_pos.shape[0], -1).permute(0, 2, 1),
-            size=max_rel_dist,
-            mode="linear",
-        )
-        rel_pos_resized = rel_pos_resized.reshape(-1, max_rel_dist).permute(1, 0)
-    else:
-        rel_pos_resized = rel_pos
 
-    # # Interpolate rel pos.
-    # rel_pos_resized = F.interpolate(
-    #     rel_pos.reshape(1, rel_pos.shape[0], -1).permute(0, 2, 1),
-    #     size=max_rel_dist,
-    #     mode="linear",
-    # )
-    # rel_pos_resized = rel_pos_resized.reshape(-1, max_rel_dist).permute(1, 0)
-
+    # Interpolate rel pos.
+    rel_pos_resized = F.interpolate(
+        rel_pos.reshape(1, rel_pos.shape[0], -1).permute(0, 2, 1),
+        size=max_rel_dist,
+        mode="linear",
+    )
+    rel_pos_resized = rel_pos_resized.reshape(-1, max_rel_dist).permute(1, 0)
 
     # Scale the coords with short length if shapes for q and k are different.
     q_coords = torch.arange(q_size)[:, None] * max(k_size / q_size, 1.0)
@@ -127,25 +104,13 @@ def get_abs_pos(abs_pos, hw:Tuple[int, int]):
     size = int(math.sqrt(xy_num))
     assert size * size == xy_num
 
-    # xxxx_8888
-    if size != h or size != w: # ==> True
-        new_abs_pos = F.interpolate(
-            abs_pos.reshape(1, size, size, -1).permute(0, 3, 1, 2),
-            size=(h, w),
-            mode="bicubic",
-            align_corners=False,
-        )
-        return new_abs_pos.permute(0, 2, 3, 1)
-    else:
-        return abs_pos.reshape(1, h, w, -1)
-    # new_abs_pos = F.interpolate(
-    #     abs_pos.reshape(1, size, size, -1).permute(0, 3, 1, 2),
-    #     size=(h, w),
-    #     mode="bicubic",
-    #     align_corners=False,
-    # )
-    # return new_abs_pos.permute(0, 2, 3, 1)
-
+    new_abs_pos = F.interpolate(
+        abs_pos.reshape(1, size, size, -1).permute(0, 3, 1, 2),
+        size=(h, w),
+        mode="bicubic",
+        align_corners=False,
+    )
+    return new_abs_pos.permute(0, 2, 3, 1)
 
 class PatchEmbed(nn.Module):
     def __init__(self, kernel_size=(16, 16), stride=(16, 16), padding=(0, 0), in_chans=4, embed_dim=384):
@@ -162,11 +127,10 @@ class PatchEmbed(nn.Module):
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
     """
-    def __init__(self,
-            in_features,
+    def __init__(self, in_features,
             hidden_features=None,
             out_features=None,
-            drop=0.,
+            # drop=0.,
     ):
         super().__init__()
         # in_features = 384
@@ -179,17 +143,17 @@ class Mlp(nn.Module):
 
         self.fc1 = nn.Linear(in_features, hidden_features, bias=True)
         self.act = nn.GELU()
-        self.drop1 = nn.Dropout(drop)
+        # self.drop1 = nn.Dropout(drop)
         # self.norm = nn.Identity() # useless
         self.fc2 = nn.Linear(hidden_features, out_features, bias=True)
-        self.drop2 = nn.Dropout(drop)
+        # self.drop2 = nn.Dropout(drop)
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.act(x)
-        x = self.drop1(x)
+        # x = self.drop1(x)
         x = self.fc2(x)
-        x = self.drop2(x)
+        # x = self.drop2(x)
         return x
 
 
@@ -294,25 +258,25 @@ class ResBottleneckBlock(nn.Module):
         return out
 
 
-class Block(nn.Module):
+class BlockForNormalWindow(nn.Module):
     """Transformer blocks with support of window attention and residual propagation blocks"""
 
     def __init__(self,
         dim = 384,
         num_heads = 6,
         mlp_ratio=4.0,
-        drop_path=0.0,
+        # drop_path=0.0,
         window_size=14, # 14 or 0 
-        use_residual_block=False,
-        use_convnext_block=False,
         input_size=(32, 32),
     ):
         super().__init__()
+        # BlockForNormalWindow: window_size=14, use_residual_block=False, use_convnext_block=False
+        # BlockForNormalWindow: window_size=0, use_residual_block=True, use_convnext_block=False
 
         self.norm1 = nn.LayerNorm(dim)
         self.attn = Attention(dim,
             num_heads=num_heads,
-            input_size=input_size if window_size == 0 else (window_size, window_size),
+            input_size= (window_size, window_size),
         )
 
         self.norm2 = nn.LayerNorm(dim)
@@ -320,24 +284,6 @@ class Block(nn.Module):
 
         self.window_size = window_size
 
-        self.use_residual_block = use_residual_block
-        if use_residual_block: # True | False
-            # Use a residual block with bottleneck channel as dim // 2
-            self.residual = ResBottleneckBlock(
-                in_channels=dim,
-                out_channels=dim,
-                bottleneck_channels=dim // 2,
-                conv_kernels=3,
-                conv_paddings=1,
-            )
-        else: # For torch.jit.script
-            self.residual = nn.Identity()
-
-        self.use_convnext_block = use_convnext_block 
-        if use_convnext_block: # True | False
-            self.convnext = ConvNextBlock(dim = dim)
-        else: # For torch.jit.script
-            self.convnext = nn.Identity()
 
     def forward(self, x):
         shortcut = x
@@ -349,32 +295,61 @@ class Block(nn.Module):
         pad_w:int = 0
         H:int = 0
         W:int = 0
-        # xxxx_8888
-        if self.window_size > 0: # True | False
-            H, W = x.shape[1], x.shape[2]
-            x, pad_h, pad_w = window_partition(x, self.window_size)
-
-        # H, W = x.shape[1], x.shape[2]
-        # x, pad_h, pad_w = window_partition(x, self.window_size)
+        H, W = x.shape[1], x.shape[2]
+        x, pad_h, pad_w = window_partition(x, self.window_size)
 
         x = self.attn(x)
 
         # Reverse window partition
-        # xxxx_8888
-        if self.window_size > 0: # True, window_size == 14 or False for window_size == 0
-            x = window_unpartition(x, self.window_size, (pad_h, pad_w), (H, W))
-        # x = window_unpartition(x, self.window_size, (pad_h, pad_w), (H, W))
+        x = window_unpartition(x, self.window_size, (pad_h, pad_w), (H, W))
 
         x = shortcut + x
         x = x + self.mlp(self.norm2(x))
 
-        if self.use_residual_block: # True | False
-            x = self.residual(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        return x
 
-        if self.use_convnext_block: # True | False
-            x = self.convnext(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+
+class BlockForZeroWindow(nn.Module):
+    """Transformer blocks with support of window attention and residual propagation blocks"""
+
+    def __init__(self,
+        dim = 384,
+        num_heads = 6,
+        mlp_ratio=4.0,
+        input_size=(32, 32),
+    ):
+        super().__init__()
+
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = Attention(dim, num_heads=num_heads, input_size=input_size)
+
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio))
+
+        # Use a residual block with bottleneck channel as dim // 2
+        self.residual = ResBottleneckBlock(
+            in_channels=dim,
+            out_channels=dim,
+            bottleneck_channels=dim // 2,
+            conv_kernels=3,
+            conv_paddings=1,
+        )
+
+
+    def forward(self, x):
+        shortcut = x
+        x = self.norm1(x)
+
+        # Window partition
+        x = self.attn(x)
+
+        # Reverse window partition
+        x = shortcut + x
+        x = x + self.mlp(self.norm2(x))
+        x = self.residual(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
 
         return x
+
 
 class ViT(nn.Module):
     """
@@ -390,7 +365,7 @@ class ViT(nn.Module):
         depth=12,
         num_heads=6,
         mlp_ratio=4.0,
-        drop_path_rate=0.0,
+        # drop_path_rate=0.0,
         window_size=14,
         window_block_indexes=[0, 1, 3, 4, 6, 7, 9, 10],
         residual_block_indexes=[2, 5, 8, 11],
@@ -411,19 +386,26 @@ class ViT(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_positions, embed_dim))
 
         # stochastic depth decay rule
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+        # dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
         self.blocks = nn.ModuleList()
         for i in range(depth):
-            block = Block(
-                dim=embed_dim,
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratio,
-                drop_path=dpr[i], # 0.0
-                window_size=window_size if i in window_block_indexes else 0,
-                use_residual_block=i in residual_block_indexes,
-                input_size=(img_size // patch_size, img_size // patch_size), # (32, 32)
-            )
+            if i in window_block_indexes:
+                block = BlockForNormalWindow(
+                    dim=embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    window_size=window_size,
+                    input_size=(img_size // patch_size, img_size // patch_size), # (32, 32)
+                )
+            else:
+                block = BlockForZeroWindow(
+                    dim=embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    input_size=(img_size // patch_size, img_size // patch_size), # (32, 32)
+                )
+
             self.blocks.append(block)
 
 
