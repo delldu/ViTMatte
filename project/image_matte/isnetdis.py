@@ -360,8 +360,8 @@ class ISNetDIS(nn.Module):
         self.side6 = nn.Conv2d(512, out_ch, 3, padding=1)
 
         self.load_weights()
-        # from ggml_engine import create_network
-        # create_network(self)
+        from ggml_engine import create_network
+        create_network(self)
 
     def load_weights(self, model_path="models/isnetdis.pth"):
         cdir = os.path.dirname(__file__)
@@ -421,7 +421,7 @@ class ISNetDIS(nn.Module):
 
         # side output
         d1 = self.side1(hx1d)
-        d1 = upsample_like(d1, x[:, 0:3, :, :])
+        # d1 = upsample_like(d1, x[:, 0:3, :, :])
 
         # d2 = self.side2(hx2d)
         # d2 = upsample_like(d2,x)
@@ -435,9 +435,9 @@ class ISNetDIS(nn.Module):
         # d6 = upsample_like(d6,x)
 
         d = torch.sigmoid(d1)
-        ma = torch.max(d)
-        mi = torch.min(d)
-        mask = (d - mi) / (ma - mi + 1e-5)
+        # ma = torch.max(d)
+        # mi = torch.min(d)
+        # mask = (d - mi) / (ma - mi + 1e-5)
         mask = F.interpolate(mask, size=(H, W), mode="bilinear", align_corners=True)
 
         # # Create trimap

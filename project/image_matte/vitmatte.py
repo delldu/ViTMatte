@@ -38,7 +38,7 @@ def window_partition(x, window_size:int) -> Tuple[torch.Tensor, int, int]:
     # window_size = 14
     B, H, W, C = x.shape
     # todos.debug.output_var("window_partition-1", x)
-
+    assert window_size == 14
     pad_h = (window_size - H % window_size) % window_size
     pad_w = (window_size - W % window_size) % window_size
     x = F.pad(x, (0, 0, 0, pad_w, 0, pad_h))
@@ -230,7 +230,6 @@ class Mlp(nn.Module):
 # xxxx_debug
 class Attention(nn.Module):
     """Multi-head Attention block with relative position embeddings."""
-
     def __init__(self, dim = 384, num_heads=6, input_size=(14, 14)):
         super().__init__()
         assert dim == 384 and num_heads == 6 
@@ -240,7 +239,7 @@ class Attention(nn.Module):
         head_dim = dim // num_heads
         assert head_dim == 64
 
-        self.scale = head_dim**-0.5
+        self.scale = head_dim**-0.5 # 0.125
 
         self.qkv = nn.Linear(dim, dim * 3, bias=True)
         self.proj = nn.Linear(dim, dim)
@@ -250,7 +249,7 @@ class Attention(nn.Module):
         self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, head_dim)) # size() -- [27, 64]
 
     def forward(self, x):
-        B, H, W, _ = x.shape # [20, 14, 14, 384]
+        B, H, W, C = x.shape # [20, 14, 14, 384]
         # qkv with shape (3, B, nHead, H * W, C)
         # if not (H == 14 and W == 14):
         #     x.size() -- torch.Size([1, 64, 43, 384])
@@ -263,9 +262,8 @@ class Attention(nn.Module):
         # -> 3x[20, 196, 6, 64] --> 3x[20, 6, 196, 64] 
 
         # q, k, v with shape (B * nHead, H * W, C)
-        q, k, v = qkv.reshape(3, B * self.num_heads, H * W, -1).unbind(0)
+        q, k, v = qkv.reshape(3, B * self.num_heads, H * W, -1).unbind(0) # torch.size() -- [120, 196, 64]
         # [3, 120, 196, 64] --> [120, 196, 64] x 3
-
         attn = (q * self.scale) @ k.transpose(-2, -1) # size() -- [120, 196, 196]
         # xxxx_debug        
         attn = add_decomposed_rel_pos(attn, q, self.rel_pos_h, self.rel_pos_w, (H, W), (H, W))
@@ -289,17 +287,22 @@ class LayerNorm(nn.Module):
     https://github.com/facebookresearch/ConvNeXt/blob/d1fa8f6fef0a165b27399986cc2bdacc92777e40/models/convnext.py#L119  # noqa B950
     """
 
-    def __init__(self, normalized_shape, eps=1e-6):
+    def __init__(self, normalized_shape):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(normalized_shape))
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
-        self.eps = eps
+        self.eps = 1e-6
         self.normalized_shape = (normalized_shape,)
 
     def forward(self, x):
+        # tensor [x] size: [1, 384, 64, 43], min: -0.201075, max: 0.193223, mean: 0.000799
         u = x.mean(1, keepdim=True)
+        # tensor [u] size: [1, 1, 64, 43], min: -0.015526, max: 0.015471, mean: 0.000799
         s = (x - u).pow(2).mean(1, keepdim=True)
         x = (x - u) / torch.sqrt(s + self.eps)
+        # tensor [x] size: [1, 384, 64, 43], min: -9.696175, max: 10.70018, mean: -0.0
+        # tensor [self.weight] size: [384], min: -0.682143, max: 0.702993, mean: -0.003777
+        # tensor [self.bias] size: [384], min: -0.178839, max: 0.146375, mean: 0.007882
         x = self.weight[:, None, None] * x + self.bias[:, None, None]
         return x
 
@@ -309,11 +312,8 @@ class ResBottleneckBlock(nn.Module):
     It contains 3 conv layers with kernels 1x1, 3x3, 1x1.
     """
     def __init__(self, in_channels, out_channels, bottleneck_channels,
-        conv_kernels=3,
-        conv_paddings=1,
     ):
         super().__init__()
-        assert conv_kernels == 3 and conv_paddings == 1
         assert in_channels == 384 and out_channels == 384 and bottleneck_channels == 192
 
         # self.in_channels = in_channels
@@ -322,8 +322,8 @@ class ResBottleneckBlock(nn.Module):
         self.norm1 = LayerNorm(bottleneck_channels)
         self.act1 = nn.GELU()
 
-        self.conv2 = nn.Conv2d(bottleneck_channels, bottleneck_channels, conv_kernels,
-            padding=conv_paddings,
+        self.conv2 = nn.Conv2d(bottleneck_channels, bottleneck_channels, 3,
+            padding=1,
             bias=False,
         )
         self.norm2 = LayerNorm(bottleneck_channels)
@@ -356,7 +356,6 @@ class BlockForNormalWindow(nn.Module):
         dim = 384,
         num_heads = 6,
         window_size=14, # 14 or 0 
-        # input_size=(32, 32),
     ):
         super().__init__()
         assert dim == 384 and num_heads == 6 and window_size == 14
@@ -415,8 +414,6 @@ class BlockForZeroWindow(nn.Module):
             in_channels=dim,
             out_channels=dim,
             bottleneck_channels=dim // 2,
-            conv_kernels=3,
-            conv_paddings=1,
         )
 
 
@@ -430,7 +427,11 @@ class BlockForZeroWindow(nn.Module):
         # Reverse window partition
         x = shortcut + x
         x = x + self.mlp(self.norm2(x))
+        # x.size() -- [1, 64, 43, 384]
+        # x.permute(0, 3, 1, 2).size() -- [1, 384, 64, 43]
+
         x = self.residual(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        # [1, 384, 64, 43] -> [1, 64, 43, 384]
 
         return x
 
@@ -445,15 +446,13 @@ class ViT(nn.Module):
         patch_size=16,
         in_chans=4,
         embed_dim=384,
-        depth=12,
         num_heads=6,
         window_size=14,
         window_block_indexes=[0, 1, 3, 4, 6, 7, 9, 10],
-        residual_block_indexes=[2, 5, 8, 11],
     ):
         super().__init__()
         assert patch_size == 16 and in_chans == 4
-        assert embed_dim == 384 and depth == 12 and num_heads == 6 and window_size == 14
+        assert embed_dim == 384 and num_heads == 6 and window_size == 14
         self.patch_embed = PatchEmbed(
             patch_size=patch_size,
             in_chans=in_chans,
@@ -467,7 +466,9 @@ class ViT(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_positions, embed_dim)) # size() -- [1, 197, 384]
 
         self.blocks = nn.ModuleList()
-        for i in range(depth):
+
+        depth = 12
+        for i in range(depth): # depth -- 12
             if i in window_block_indexes: # [0, 1, 3, 4, 6, 7, 9, 10]
                 block = BlockForNormalWindow(
                     dim=embed_dim,
@@ -486,8 +487,8 @@ class ViT(nn.Module):
 
     def forward(self, x):
         # tensor [x] size: [1, 4, 1024, 688], min: -2.117904, max: 2.610589, mean: 0.374034
-        x = self.patch_embed(x)
-        x = x + get_abs_pos(self.pos_embed, (x.shape[1], x.shape[2]))
+        x = self.patch_embed(x) # B, H, W, C
+        x = x + get_abs_pos(self.pos_embed, (x.shape[1], x.shape[2])) # H, W ?
 
         for blk in self.blocks:
             x = blk(x)

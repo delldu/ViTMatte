@@ -100,3 +100,16 @@ ggml_tensor_t *add_decomposed_rel_pos(struct ggml_context* ctx, ggml_tensor_t* a
 
     return ggml_reshape_3d(ctx, attn, W*H, W*H, B);
 }
+
+// def upsample_like(src, tar):
+//     return F.interpolate(src, size=tar.shape[2:], mode="bilinear", align_corners=True)
+
+ggml_tensor_t *upsample_like(struct ggml_context* ctx, ggml_tensor_t* src, ggml_tensor_t* dst)
+{
+    int W = (int)dst->ne[0];
+    int H = (int)dst->ne[1];
+    int C = (int)src->ne[2];
+    int B = (int)src->ne[3];
+
+    return ggml_upscale_ext(ctx, src, W, H, C, B);
+}
