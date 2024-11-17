@@ -13,6 +13,7 @@ import os
 import torch
 import image_matte
 import argparse
+import todos
 import pdb
 
 def test_input_shape():
@@ -22,7 +23,7 @@ def test_input_shape():
 
     print("Test input shape ...")
 
-    model, device = image_matte.get_matte_model()
+    model, device = image_matte.get_vitmat_model()
 
     N = 100
     B, C, H, W = 1, 4, model.MAX_H, model.MAX_W
@@ -51,7 +52,7 @@ def test_input_shape():
 def run_bench_mark():
     print("Run benchmark ...")
 
-    model, device = image_matte.get_matte_model()
+    model, device = image_matte.get_vitmat_model()
     N = 100
     B, C, H, W = 1, 4, model.MAX_H, model.MAX_W
 
@@ -80,7 +81,7 @@ def export_netdis_onnx_model():
     model, device = image_matte.get_netdis_model()
     model = model.to(device)
 
-    B, C, H, W = 1, 3, model.MAX_H, model.MAX_W
+    B, C, H, W = 1, 4, model.MAX_H, model.MAX_W
     dummy_input = torch.randn(B, C, H, W).to(device).clamp(0.0, 1.0)
     with torch.no_grad():
         dummy_output = model(dummy_input)
@@ -96,16 +97,17 @@ def export_netdis_onnx_model():
     onnx_filename = "output/image_netdis.onnx"
 
     torch.onnx.export(model, dummy_input, onnx_filename, 
-        verbose=True,
+        verbose=False,
         input_names=input_names, 
         output_names=output_names,
-        # dynamic_axes=dynamic_axes,
+        # dynamic_axes=dynamic_axes, # netdis only support static shape
     )
 
     # 3. Check onnx model file
     onnx_model = onnx.load(onnx_filename)
     onnx.checker.check_model(onnx_model)
 
+    print("Export image_netdis finished ...")
     onnx_model, check = simplify(onnx_model)
     assert check, "Simplified ONNX model could not be validated"
     onnx_model = onnxoptimizer.optimize(onnx_model)    
@@ -129,6 +131,7 @@ def export_netdis_onnx_model():
     assert len(torch_outputs) == len(onnx_outputs)
     for torch_output, onnx_output in zip(torch_outputs, onnx_outputs):
         torch.testing.assert_close(torch_output, torch.tensor(onnx_output), rtol=0.01, atol=0.01)
+    todos.model.reset_device()
 
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
 
@@ -195,6 +198,8 @@ def export_vitmat_onnx_model():
     for torch_output, onnx_output in zip(torch_outputs, onnx_outputs):
         torch.testing.assert_close(torch_output, torch.tensor(onnx_output), rtol=0.01, atol=0.01)
 
+    todos.model.reset_device()
+
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
 
 
@@ -211,7 +216,7 @@ if __name__ == "__main__":
     if args.bench_mark:
         run_bench_mark()
     if args.export_onnx:
-        # export_netdis_onnx_model() # OK on static shape
+        export_netdis_onnx_model() # OK on static shape
         export_vitmat_onnx_model() # OK on trace mode
     
     if not (args.shape_test or args.bench_mark or args.export_onnx):

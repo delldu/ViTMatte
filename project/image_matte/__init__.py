@@ -24,49 +24,6 @@ from . import isnetdis, vitmatte
 import pdb
 
 
-# class ImageMatte(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.MAX_H = 1024
-#         self.MAX_W = 1024
-#         self.MAX_TIMES = 16
-#         # GPU 3G, 110ms
-
-#         self.isnet_dis = isnetdis.ISNetDIS()
-#         self.vit_matte = vitmatte.ViTMatte()
-
-#         for m in self.modules():
-#             # print(m.__class__.__name__)
-#             if 'BatchNorm2d' in m.__class__.__name__:
-#                 m.train(False)
-
-
-#     def forward(self, x):
-#         B, C, H, W = x.size()
-
-#         pad_h = self.MAX_TIMES - (H % self.MAX_TIMES)
-#         pad_w = self.MAX_TIMES - (W % self.MAX_TIMES)
-#         x = F.pad(x, (0, pad_w, 0, pad_h), 'reflect')
-
-#         # xxxx_8888
-#         images = x[:, 0:3, :, :]
-#         trimap = x[:, 3:4, :, :]
-
-#         # Unkown area exist ?
-#         fg_area = (trimap >= 0.9).to(torch.float32).sum().item()
-#         bg_area = (trimap <= 0.1).to(torch.float32).sum().item()
-#         unkown_area_ratio = 1.0  - (fg_area + bg_area)/(B * H *W)
-
-#         if unkown_area_ratio < 0.05:
-#             # Unkown seems not exist, Create trimap by ISNetDIS
-#             x = self.isnet_dis(images)
-
-#         # Create matte by VitMatte
-#         output = self.vit_matte(x)
-#         output = output[:, :, 0:H, 0:W]
-
-#         return output
-
 def get_netdis_model():
     """Create model."""
 
@@ -77,17 +34,17 @@ def get_netdis_model():
 
     print(f"Running model on {device} ...")
 
-    # make sure model good for C/C++
-    model = torch.jit.script(model)
-    # https://github.com/pytorch/pytorch/issues/52286
-    torch._C._jit_set_profiling_executor(False)
-    # C++ Reference
-    # torch::jit::getProfilingMode() = false;                                                                                                             
-    # torch::jit::setTensorExprFuserEnabled(false);
+    # # make sure model good for C/C++
+    # model = torch.jit.script(model)
+    # # https://github.com/pytorch/pytorch/issues/52286
+    # torch._C._jit_set_profiling_executor(False)
+    # # C++ Reference
+    # # torch::jit::getProfilingMode() = false;                                                                                                             
+    # # torch::jit::setTensorExprFuserEnabled(false);
 
-    todos.data.mkdir("output")
-    if not os.path.exists("output/image_matte.torch"):
-        model.save("output/image_netdis.torch")
+    # todos.data.mkdir("output")
+    # if not os.path.exists("output/image_matte.torch"):
+    #     model.save("output/image_netdis.torch")
 
     return model, device
 
@@ -103,17 +60,17 @@ def get_vitmat_model():
 
     print(f"Running model on {device} ...")
 
-    # make sure model good for C/C++
-    model = torch.jit.script(model)
-    # https://github.com/pytorch/pytorch/issues/52286
-    torch._C._jit_set_profiling_executor(False)
-    # C++ Reference
-    # torch::jit::getProfilingMode() = false;                                                                                                             
-    # torch::jit::setTensorExprFuserEnabled(false);
+    # # make sure model good for C/C++
+    # model = torch.jit.script(model)
+    # # https://github.com/pytorch/pytorch/issues/52286
+    # torch._C._jit_set_profiling_executor(False)
+    # # C++ Reference
+    # # torch::jit::getProfilingMode() = false;                                                                                                             
+    # # torch::jit::setTensorExprFuserEnabled(false);
 
-    todos.data.mkdir("output")
-    if not os.path.exists("output/image_matte.torch"):
-        model.save("output/image_vitmat.torch")
+    # todos.data.mkdir("output")
+    # if not os.path.exists("output/image_matte.torch"):
+    #     model.save("output/image_vitmat.torch")
 
     return model, device
 
@@ -130,41 +87,12 @@ def get_vitmat_trace_model():
 
     return model, device
 
-def get_matte_model():
-    """Create model."""
-
-    model = ImageMatte()
-    # model = todos.model.ResizePadModel(model)
-
-    device = todos.model.get_device()
-    model = model.to(device)
-    model.eval()
-
-
-    print(f"Running model on {device} ...")
-
-    # make sure model good for C/C++
-    model = torch.jit.script(model)
-    # https://github.com/pytorch/pytorch/issues/52286
-    torch._C._jit_set_profiling_executor(False)
-    # C++ Reference
-    # torch::jit::getProfilingMode() = false;                                                                                                             
-    # torch::jit::setTensorExprFuserEnabled(false);
-
-    todos.data.mkdir("output")
-    if not os.path.exists("output/image_matte.torch"):
-        model.save("output/image_matte.torch")
-
-    return model, device
-
 
 def image_matte_predict(input_files, output_dir):
     # Create directory to store result
     todos.data.mkdir(output_dir)
 
     # load model
-    # model, device = get_matte_model()
-
     device = todos.model.get_device()
 
     model1, device1 = get_netdis_model()

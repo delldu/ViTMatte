@@ -36,8 +36,10 @@ def upsample_like(src, tar):
 
 ### RSU-7 ###
 class RSU7(nn.Module):
-    def __init__(self, in_ch=3, mid_ch=12, out_ch=3, img_size=512):
+    # def __init__(self, in_ch=3, mid_ch=12, out_ch=3, img_size=512):
+    def __init__(self, in_ch=3, mid_ch=12, out_ch=3):
         super().__init__()
+        # assert img_size == 512
         self.rebnconvin = REBNCONV(in_ch, out_ch, dirate=1)  ## 1 -> 1/2
 
         self.rebnconv1 = REBNCONV(out_ch, mid_ch, dirate=1)
@@ -203,7 +205,6 @@ class RSU5(nn.Module):
 
     def forward(self, x):
         hx = x
-
         hxin = self.rebnconvin(hx)
 
         hx1 = self.rebnconv1(hxin)
@@ -320,6 +321,8 @@ class ISNetDIS(nn.Module):
         self.MAX_H = 1024
         self.MAX_W = 1024
         self.MAX_TIMES = 16
+        # GPU -- 2G, 60ms
+        assert in_ch == 3 and out_ch == 1
         
         self.conv_in = nn.Conv2d(in_ch, 64, 3, stride=2, padding=1)
         self.pool_in = nn.MaxPool2d(2, stride=2, ceil_mode=True)
@@ -348,6 +351,7 @@ class ISNetDIS(nn.Module):
         self.stage2d = RSU6(256, 32, 64)
         self.stage1d = RSU7(128, 16, 64)
 
+        assert out_ch == 1
         self.side1 = nn.Conv2d(64, out_ch, 3, padding=1)
         self.side2 = nn.Conv2d(64, out_ch, 3, padding=1)
         self.side3 = nn.Conv2d(128, out_ch, 3, padding=1)
@@ -356,6 +360,8 @@ class ISNetDIS(nn.Module):
         self.side6 = nn.Conv2d(512, out_ch, 3, padding=1)
 
         self.load_weights()
+        # from ggml_engine import create_network
+        # create_network(self)
 
     def load_weights(self, model_path="models/isnetdis.pth"):
         cdir = os.path.dirname(__file__)
@@ -364,10 +370,10 @@ class ISNetDIS(nn.Module):
 
     def forward(self, x):
         '''
-            Create trimap for x, x is Bx3xHxW Tensor
+            Create trimap for x, x is Bx4xHxW Tensor
         '''
         B, C, H, W = x.size()
-        hx = x
+        hx = x[:, 0:3, :, :]
 
         hx = hx - 0.5  # for normalize, [0.5,0.5,0.5],[1.0,1.0,1.0]
         hx = F.interpolate(hx, size=(1024, 1024), mode="bilinear", align_corners=False)
@@ -415,7 +421,7 @@ class ISNetDIS(nn.Module):
 
         # side output
         d1 = self.side1(hx1d)
-        d1 = upsample_like(d1, x)
+        d1 = upsample_like(d1, x[:, 0:3, :, :])
 
         # d2 = self.side2(hx2d)
         # d2 = upsample_like(d2,x)
@@ -434,11 +440,11 @@ class ISNetDIS(nn.Module):
         mask = (d - mi) / (ma - mi + 1e-5)
         mask = F.interpolate(mask, size=(H, W), mode="bilinear", align_corners=True)
 
-        # Create trimap
-        fg = mask >= 0.90
-        bg = mask <= 0.10
-        mask[:] = 0.5 # unkown
-        mask[bg] = 0.0
-        mask[fg] = 1.0
+        # # Create trimap
+        # fg = mask >= 0.90
+        # bg = mask <= 0.10
+        # mask[:] = 0.5 # unkown
+        # mask[bg] = 0.0
+        # mask[fg] = 1.0
 
         return torch.cat((x[:, 0:3, :, :], mask), dim=1)
