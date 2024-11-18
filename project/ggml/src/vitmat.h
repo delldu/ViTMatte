@@ -7,6 +7,104 @@
 
 #include <vector>
 
+ggml_tensor_t *get_abs_pos(struct ggml_context* ctx, ggml_tensor_t* abs_pos, int H, int W);
+ggml_tensor_t *add_decomposed_rel_pos(struct ggml_context* ctx, ggml_tensor_t* attn, ggml_tensor_t* q,
+    ggml_tensor_t* rel_pos_h, ggml_tensor_t* rel_pos_w, int H, int W);
+
+/*
+ BasicConv3x3(
+  (conv): Conv2d(68, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+  (bn): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (relu): ReLU()
+) */
+
+struct BasicConv3x3 {
+    int in_channels;
+    int out_channels;
+    int stride;
+
+    struct Conv2d conv;
+    struct BatchNorm2d bn;
+
+    void create_weight_tensors(struct ggml_context* ctx) {
+        conv.in_channels = in_channels;
+        conv.out_channels = out_channels;
+        conv.kernel_size = {3, 3};
+        conv.stride = { stride, stride };
+        conv.padding = { 1, 1 };
+        // conv.dilation = { 1, 1 };
+        // conv.is_depthwise = false;
+        conv.has_bias = false;
+        conv.create_weight_tensors(ctx);
+ 
+        bn.num_features = out_channels;
+        bn.create_weight_tensors(ctx);
+    }
+
+    void setup_weight_names(const char *prefix) {
+        char s[GGML_MAX_NAME];
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "conv.");
+        conv.setup_weight_names(s);
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "bn.");
+        bn.setup_weight_names(s);
+    }
+
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        x = conv.forward(ctx, x);
+        x = bn.forward(ctx, x);
+        x = ggml_relu(ctx, x);
+
+        return x;
+    }
+};
+
+/*
+ Mlp(
+  (fc1): Linear(in_features=384, out_features=1536, bias=True)
+  (act): GELU(approximate='none')
+  (fc2): Linear(in_features=1536, out_features=384, bias=True)
+) */
+struct Mlp {
+    int in_features = 384;
+    int hidden_features = 1536;
+
+    // network params
+    struct Linear fc1;
+    struct Linear fc2;
+
+    void create_weight_tensors(struct ggml_context* ctx) {
+        fc1.in_features = in_features;
+        fc1.out_features = hidden_features;
+        fc1.has_bias = true;
+        fc1.create_weight_tensors(ctx);
+
+        fc2.in_features = hidden_features;
+        fc2.out_features = in_features;
+        fc2.has_bias = true;
+        fc2.create_weight_tensors(ctx);
+    }
+
+    void setup_weight_names(const char *prefix) {
+        char s[GGML_MAX_NAME];
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "fc1.");
+        fc1.setup_weight_names(s);
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "fc2.");
+        fc2.setup_weight_names(s);
+    }
+
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        x = fc1.forward(ctx, x);
+        x = ggml_relu(ctx, x);
+        x = fc2.forward(ctx, x);
+
+        return x;
+    }
+};
+
 struct MattingHead {
     // network params
     struct Conv2d conv_0;
@@ -99,14 +197,6 @@ struct FusionBlock {
         conv.setup_weight_names(s);
     }
 
-    // def __init__(self, in_chans, out_chans):
-    //     super().__init__()
-    //     self.conv = BasicConv3x3(in_chans, out_chans, stride=1, padding=1)
-
-    // def forward(self, x, D):
-    //     up = F.interpolate(x, scale_factor=2.0, mode='bilinear', align_corners=False)
-    //     out = torch.cat([D, up], dim=1)
-    //     out = self.conv(out)
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* dn) {
         int W = (int)x->ne[0];
         int H = (int)x->ne[1];
@@ -121,54 +211,6 @@ struct FusionBlock {
     }
 };
 
-/*
- BasicConv3x3(
-  (conv): Conv2d(68, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-  (bn): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-  (relu): ReLU()
-) */
-
-struct BasicConv3x3 {
-    int in_channels;
-    int out_channels;
-    int stride;
-
-    struct Conv2d conv;
-    struct BatchNorm2d bn;
-
-    void create_weight_tensors(struct ggml_context* ctx) {
-        conv.in_channels = in_channels;
-        conv.out_channels = out_channels;
-        conv.kernel_size = {3, 3};
-        conv.stride = { stride, stride };
-        conv.padding = { 1, 1 };
-        // conv.dilation = { 1, 1 };
-        // conv.is_depthwise = false;
-        conv.has_bias = false;
-        conv.create_weight_tensors(ctx);
- 
-        bn.num_features = out_channels;
-        bn.create_weight_tensors(ctx);
-    }
-
-    void setup_weight_names(const char *prefix) {
-        char s[GGML_MAX_NAME];
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "conv.");
-        conv.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "bn.");
-        bn.setup_weight_names(s);
-    }
-
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        x = conv.forward(ctx, x);
-        x = bn.forward(ctx, x);
-        x = ggml_relu(ctx, x);
-
-    	return x;
-    }
-};
 
 /*
  ConvStream(
@@ -235,7 +277,7 @@ struct ConvStream {
         xlist.push_back(x);
 
         x = convs_2.forward(ctx, x);
-        list.push_back(x);
+        xlist.push_back(x);
 
     	return xlist;
     }
@@ -443,6 +485,8 @@ struct ResBottleneckBlock {
     void create_weight_tensors(struct ggml_context* ctx) {
         conv1.in_channels = in_channels;
         conv1.out_channels = bottleneck_channels;
+        conv1.kernel_size = {1, 1};
+        conv1.has_bias = false;
         conv1.create_weight_tensors(ctx);
 
         norm1.normalized_shape = bottleneck_channels;
@@ -450,6 +494,8 @@ struct ResBottleneckBlock {
 
         conv2.in_channels = bottleneck_channels;
         conv2.out_channels = bottleneck_channels;
+        conv2.padding = { 1, 1 };
+        conv2.has_bias = false;
         conv2.create_weight_tensors(ctx);
 
         norm2.normalized_shape = bottleneck_channels;
@@ -457,6 +503,8 @@ struct ResBottleneckBlock {
 
         conv3.in_channels = bottleneck_channels;
         conv3.out_channels = out_channels;
+        conv3.kernel_size = {1, 1};
+        conv3.has_bias = false;
         conv3.create_weight_tensors(ctx);
 
         norm3.normalized_shape = out_channels;
@@ -502,6 +550,104 @@ struct ResBottleneckBlock {
         out = norm3.forward(ctx, out);
 
     	return ggml_add(ctx, x, out);
+    }
+};
+
+/*
+ Attention(
+  (qkv): Linear(in_features=384, out_features=1152, bias=True)
+  (proj): Linear(in_features=384, out_features=384, bias=True)
+) */
+
+struct Attention {
+    // network hparams
+    int dim = 384;
+    int num_heads = 6;
+    int input_height = 14;
+    int input_width = 14;
+    int head_dim = 64;
+    float scale = 0.125;
+
+    struct Linear qkv;
+    struct Linear proj;
+
+    // self.qkv = nn.Linear(dim, dim * 3, bias=True)
+    // self.proj = nn.Linear(dim, dim)
+
+    ggml_tensor_t *rel_pos_h;
+    ggml_tensor_t *rel_pos_w;
+
+    void create_weight_tensors(struct ggml_context* ctx) {
+        qkv.in_features = dim;
+        qkv.out_features = dim * 3;
+        qkv.has_bias = true;
+        qkv.create_weight_tensors(ctx);
+
+        proj.in_features = dim;
+        proj.out_features = dim;
+        proj.has_bias = false;
+        proj.create_weight_tensors(ctx);
+
+        rel_pos_h = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64 /*head_dim*/, 2*input_height - 1);
+        rel_pos_w = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 64 /*head_dim*/, 2*input_width - 1);
+    }
+
+    void setup_weight_names(const char *prefix) {
+        char s[GGML_MAX_NAME];
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "qkv.");
+        qkv.setup_weight_names(s);
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "proj.");
+        proj.setup_weight_names(s);
+
+        ggml_format_name(rel_pos_h, "%s%s", prefix, "rel_pos_h");
+        ggml_format_name(rel_pos_w, "%s%s", prefix, "rel_pos_w");
+    }
+
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        // B, H, W, C = x.size(), [20, 14, 14, 384] --> [20, 196, 3*6, 64]
+        int C = (int)x->ne[0];
+        int W = (int)x->ne[1];
+        int H = (int)x->ne[2];
+        int B = (int)x->ne[3];
+
+        ggml_tensor_t *y = qkv.forward(ctx, x);
+        y = ggml_reshape_3d(ctx, y, C, W*H, B); // torch -- [B, H*W, C]
+        y = ggml_reshape_4d(ctx, y, head_dim, 3*num_heads, W*H, B); // torch -- [B, H*W, 18, 64]
+        ggml_tensor_t *q = ggml_nn_slice(ctx, y, 1/*dim*/, 0*num_heads, 1*num_heads, 1 /*step*/);
+        ggml_tensor_t *k = ggml_nn_slice(ctx, y, 1/*dim*/, 1*num_heads, 2*num_heads, 1 /*step*/);
+        ggml_tensor_t *v = ggml_nn_slice(ctx, y, 1/*dim*/, 2*num_heads, 3*num_heads, 1 /*step*/);
+        // q, k, v f32 [64, 6, 196, 20] --> [64, 196, 120]
+        q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
+        q = ggml_reshape_3d(ctx, q, head_dim, H*W, num_heads * B);
+        k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
+        k = ggml_reshape_3d(ctx, k, head_dim, H*W, num_heads * B);
+        v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
+        v = ggml_reshape_3d(ctx, v, head_dim, H*W, num_heads * B);
+        
+        ggml_tensor_t* q_scale = ggml_scale(ctx, q, scale);
+        ggml_tensor_t* k_transpose = ggml_transpose(ctx, k); 
+        ggml_tensor_t *attn = ggml_nn_mul_mat(ctx, q_scale, k_transpose);
+        attn = add_decomposed_rel_pos(ctx, attn, q, rel_pos_h, rel_pos_w, H, W);
+        attn = ggml_soft_max(ctx, attn);
+
+        attn = ggml_nn_mul_mat(ctx, attn, v); // [120, 196, 64]
+        // test_reshape_case
+
+        // x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
+        // # [120, 196, 64] -> [20, 6, 14, 14, 64] -> [20, 14, 14, 6, 64] -> [20, 14, 14, 384]
+        // # ggml: [120, 196, 64] -> [20, 6, 196, 64] -> [20, 196, 6, 64] -> [20, 196, 384] -> [20, 14, 14, 384]
+
+        // x = self.proj(x)
+        // # tensor [x] size: [20, 14, 14, 384], min: -477.986969, max: 1045.842041, mean: -1.808324
+        x = ggml_reshape_4d(ctx, attn, head_dim, W*H, num_heads, B);
+        x = ggml_cont(ctx, ggml_permute(ctx, x, 0, 2, 1, 3)); // [64, 196, 6, 20] -> [64, 6, 196, 20]
+        x = ggml_reshape_3d(ctx, x, num_heads * head_dim, W*H, B); // [384, 196, 20]
+        x = ggml_reshape_4d(ctx, x, num_heads * head_dim, W, H, B); // [384, 14, 14, 20]
+
+        x = proj.forward(ctx, x);
+        return x;
     }
 };
 
@@ -601,7 +747,7 @@ struct BlockForZeroWindow {
         ggml_tensor_t *shortcut = x;
         x = norm1.forward(ctx, x);
         x = attn.forward(ctx, x);
-        x = ggml_add(ctx, shortcut);
+        x = ggml_add(ctx, x, shortcut);
         ggml_tensor_t *y = norm2.forward(ctx, x);
         y = mlp.forward(ctx, y);
         x = ggml_add(ctx, x, y);
@@ -618,148 +764,7 @@ struct BlockForZeroWindow {
     }
 };
 
-/*
- Mlp(
-  (fc1): Linear(in_features=384, out_features=1536, bias=True)
-  (act): GELU(approximate='none')
-  (fc2): Linear(in_features=1536, out_features=384, bias=True)
-) */
-struct Mlp {
-    int in_features == 384;
-    int hidden_features == 1536;
 
-    // network params
-    struct Linear fc1;
-    struct Linear fc2;
-
-    void create_weight_tensors(struct ggml_context* ctx) {
-        fc1.in_features = in_features;
-        fc1.out_features = hidden_features;
-        fc1.has_bias = true;
-        fc1.create_weight_tensors(ctx);
-
-        fc2.in_features = hidden_features;
-        fc2.out_features = in_features;
-        fc2.has_bias = true;
-        fc2.create_weight_tensors(ctx);
-    }
-
-    void setup_weight_names(const char *prefix) {
-        char s[GGML_MAX_NAME];
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "fc1.");
-        fc1.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "fc2.");
-        fc2.setup_weight_names(s);
-    }
-
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        x = fc1.forward(ctx, x);
-        x = ggml_relu(ctx, x);
-        x = fc2.forward(ctx, x);
-
-    	return x;
-    }
-};
-
-/*
- Attention(
-  (qkv): Linear(in_features=384, out_features=1152, bias=True)
-  (proj): Linear(in_features=384, out_features=384, bias=True)
-) */
-
-struct Attention {
-    // network hparams
-    int dim = 384;
-    int num_heads = 6;
-    int input_height = 14;
-    int input_width = 14;
-    int head_dim = 64;
-    float scale = 0.125;
-
-    struct Linear qkv;
-    struct Linear proj;
-
-    // self.qkv = nn.Linear(dim, dim * 3, bias=True)
-    // self.proj = nn.Linear(dim, dim)
-
-    ggml_tensor_t *rel_pos_h;
-    ggml_tensor_t *rel_pos_w;
-
-    void create_weight_tensors(struct ggml_context* ctx) {
-        qkv.in_features = dim;
-        qkv.out_features = dim * 3;
-        qkv.has_bias = true;
-        qkv.create_weight_tensors(ctx);
-
-        proj.in_features = dim;
-        proj.out_features = dim;
-        proj.has_bias = false;
-        proj.create_weight_tensors(ctx);
-
-        rel_pos_h = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2*input_height - 1, 64 /*head_dim*/);
-        rel_pos_w = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2*input_width - 1, 64 /*head_dim*/);
-    }
-
-    void setup_weight_names(const char *prefix) {
-        char s[GGML_MAX_NAME];
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "qkv.");
-        qkv.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "proj.");
-        proj.setup_weight_names(s);
-
-        ggml_format_name(rel_pos_h, "%s%s", prefix, "rel_pos_h");
-        ggml_format_name(rel_pos_w, "%s%s", prefix, "rel_pos_w");
-    }
-
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        // B, H, W, C = x.size(), [20, 14, 14, 384] --> [20, 196, 3*6, 64]
-        int C = (int)x->ne[0];
-        int W = (int)x->ne[1];
-        int H = (int)x->ne[2];
-        int B = (int)x->ne[3];
-
-        ggml_tensor_t *y = qkv.forward(ctx, x);
-        y = ggml_reshape_3d(ctx, y, C, W*H, B); // torch -- [B, H*W, C]
-        y = ggml_reshape_4d(ctx, y, head_dim, 3*num_heads, W*H, B); // torch -- [B, H*W, 18, 64]
-        ggml_tensor_t *q = ggml_nn_slice(ctx, y, 1/*dim*/, 0*num_heads, 1*num_heads, 1 /*step*/);
-        ggml_tensor_t *k = ggml_nn_slice(ctx, y, 1/*dim*/, 1*num_heads, 2*num_heads, 1 /*step*/);
-        ggml_tensor_t *v = ggml_nn_slice(ctx, y, 1/*dim*/, 2*num_heads, 3*num_heads, 1 /*step*/);
-        // q, k, v f32 [64, 6, 196, 20] --> [64, 196, 120]
-        q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
-        q = ggml_reshape_3d(ctx, q, head_dim, H*W, num_heads * B);
-        k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
-        k = ggml_reshape_3d(ctx, k, head_dim, H*W, num_heads * B);
-        v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
-        v = ggml_reshape_3d(ctx, v, head_dim, H*W, num_heads * B);
-        
-        ggml_tensor_t* q_scale = ggml_scale(ctx, q, scale);
-        ggml_tensor_t* k_transpose = ggml_transpose(ctx, k); 
-        ggml_tensor_t *attn = ggml_nn_mul_mat(ctx, q_scale, k_transpose);
-        attn = add_decomposed_rel_pos(ctx, attn, q, rel_pos_h, rel_pos_w, H, W);
-        attn = ggml_soft_max(ctx, attn);
-
-        attn = ggml_nn_mul_mat(ctx, attn, v); // [120, 196, 64]
-        // test_reshape_case
-
-        // x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
-        // # [120, 196, 64] -> [20, 6, 14, 14, 64] -> [20, 14, 14, 6, 64] -> [20, 14, 14, 384]
-        // # ggml: [120, 196, 64] -> [20, 6, 196, 64] -> [20, 196, 6, 64] -> [20, 196, 384] -> [20, 14, 14, 384]
-
-        // x = self.proj(x)
-        // # tensor [x] size: [20, 14, 14, 384], min: -477.986969, max: 1045.842041, mean: -1.808324
-        x = ggml_reshape_3d(ctx, attn, head_dim, W*H, num_heads, B);
-        x = ggml_cont(ctx, ggml_permute(ctx, x, 0, 2, 1, 3)); // [64, 196, 6, 20] -> [64, 6, 196, 20]
-        x = ggml_reshape_3d(ctx, x, num_heads * head_dim, W*H, B); // [384, 196, 20]
-        x = ggml_reshape_4d(ctx, x, num_heads * head_dim, W, H, B); // [384, 14, 14, 20]
-
-        x = proj.forward(ctx, x);
-    	return x;
-    }
-};
 
 /*
  BlockForNormalWindow(
@@ -1049,7 +1054,13 @@ struct PatchEmbed {
 
 struct ViT {
     // network hparams
-    
+
+    // num_patches = (224 // patch_size) * (224 // patch_size) # 14 * 14 ==> 196
+    // num_positions = (num_patches + 1) # 197
+
+    // self.pos_embed = nn.Parameter(torch.zeros(1, num_positions, embed_dim)) # size() -- [1, 197, 384]
+
+    ggml_tensor_t* pos_embed;
 
     // network params
     struct PatchEmbed patch_embed;
@@ -1069,6 +1080,8 @@ struct ViT {
 
 
     void create_weight_tensors(struct ggml_context* ctx) {
+        pos_embed = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 384, 197, 1);
+
         patch_embed.create_weight_tensors(ctx);
         // (0-1): 2 x BlockForNormalWindow(
         //   (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
@@ -1100,6 +1113,9 @@ struct ViT {
 
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
+
+        ggml_format_name(pos_embed, "%s%s", prefix, "pos_embed");
+
         snprintf(s, sizeof(s), "%s%s", prefix, "patch_embed.");
         patch_embed.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "blocks.0.");
@@ -1380,7 +1396,7 @@ struct ViT {
   (normal): Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 ) */
 
-struct ViTMatte {
+struct ViTMatte : GGMLNetwork {
     // network hparams
     int MAX_H = 1024;
     int MAX_W = 2048;
@@ -1390,6 +1406,11 @@ struct ViTMatte {
     struct ViT backbone;
     struct DetailCapture decoder;
     struct Normalize normal;
+
+    size_t get_graph_size()
+    {
+        return GGML_DEFAULT_GRAPH_SIZE * 4; // 2048 * 4
+    }
 
     void create_weight_tensors(struct ggml_context* ctx) {
         backbone.create_weight_tensors(ctx);
@@ -1407,7 +1428,10 @@ struct ViTMatte {
         normal.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+    // ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+    ggml_tensor_t* forward(ggml_context_t* ctx, int argc, ggml_tensor_t* argv[]) {
+        GGML_UNUSED(argc);
+        ggml_tensor_t* x = argv[0];
         // '''
         //     x is Bx4xHxW tensor, alpha channel of x is trimap
         // '''

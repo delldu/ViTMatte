@@ -87,8 +87,8 @@ ggml_tensor_t *add_decomposed_rel_pos(struct ggml_context* ctx, ggml_tensor_t* a
     // rel_h = rel_h.reshape(B, H*W, H, 1).repeat(1, 1, 1, W)
     // rel_w = rel_w.reshape(B, H*W, 1, W).repeat(1, 1, H, 1)    
     attn = ggml_reshape_4d(ctx, attn, W, H, W*H, B);
-    rel_h = ggml_reshape_4d(ctx, 1, H, W*H, B);
-    rel_w = ggml_reshape_4d(ctx, W, 1, W*H, B);
+    rel_h = ggml_reshape_4d(ctx, rel_h, 1, H, W*H, B);
+    rel_w = ggml_reshape_4d(ctx, rel_w, W, 1, W*H, B);
 
     // test_add_rel_pos
     // g_y = ggml.ggml_add(ctx, g_attn, g_rel_h)
@@ -112,4 +112,41 @@ ggml_tensor_t *upsample_like(struct ggml_context* ctx, ggml_tensor_t* src, ggml_
     int B = (int)src->ne[3];
 
     return ggml_upscale_ext(ctx, src, W, H, C, B);
+}
+
+
+// def get_abs_pos(abs_pos, hw:Tuple[int, int]):
+//     # tensor [abs_pos] size: [1, 197, 384], min: -0.161103, max: 0.160729, mean: 1.1e-05
+//     # hw = (64, 43)
+//     h, w = hw
+//     abs_pos = abs_pos[:, 1:] # ==> [1, 196, 384]
+//     xy_num = abs_pos.shape[1] # ===> 196
+//     size = int(math.sqrt(xy_num))
+//     assert size * size == xy_num
+//     assert size == 14
+
+//     # abs_pos.reshape(1, size, size, -1).size() -- [1, 14, 14, 384]
+//     new_abs_pos = F.interpolate(
+//         abs_pos.reshape(1, size, size, -1).permute(0, 3, 1, 2), #[] -> [1, 384, 14, 14]
+//         size=(h, w),
+//         mode="bicubic",
+//         align_corners=False,
+//     )
+//     return new_abs_pos.permute(0, 2, 3, 1) # [1, 384, 64, 43] --> [1, 64, 43, 384]
+
+ggml_tensor_t *get_abs_pos(struct ggml_context* ctx, ggml_tensor_t* abs_pos, int H, int W)
+{
+    int C = (int)abs_pos->ne[0];
+    int HW = (int)abs_pos->ne[1] - 1;
+    int B = (int)abs_pos->ne[2];
+
+    abs_pos = ggml_nn_slice(ctx, abs_pos, 1/*dim*/, 0, HW, 1/*step*/);
+    int size = (int)sqrtf((float)HW);
+    GGML_ASSERT( HW == size * size);
+
+    abs_pos = ggml_reshape_4d(ctx, abs_pos, C, size, size, B);
+    // abs_pos = ggml_permute(ctx, abs_pos, 1, 2, 0, 3); // [C, W, H, B] --> [W, H, C, B]
+    abs_pos = ggml_upscale_ext(ctx, abs_pos, C, W, H, B);
+
+    return abs_pos;
 }

@@ -20,25 +20,13 @@
 #define DEFAULT_DEVICE 1
 #define DEFAULT_OUTPUT "output"
 
-int image_patch_client(FFCResNetGenerator *net, char *input_filename, char *output_filename)
+int image_netdis_predict(ISNetDIS *net, char *input_filename, char *output_filename)
 {
     TENSOR *argv[1];
 
-    printf("Patch %s to %s ...\n", input_filename, output_filename);
+    printf("Matte %s to %s ...\n", input_filename, output_filename);
     TENSOR *input_tensor = tensor_load_image(input_filename, 1 /*alpha*/);
     check_tensor(input_tensor);
-
-    // self.MAX_H = 2048
-    // self.MAX_W = 4096
-    // self.MAX_TIMES = 32
-    const int MAX_TIMES = 32;
-    int H = input_tensor->height;
-    int W = input_tensor->width;
-    int pad_h = (MAX_TIMES - (H % MAX_TIMES)) % MAX_TIMES;
-    int pad_w = (MAX_TIMES - (W % MAX_TIMES)) % MAX_TIMES;
-
-    if (tensor_border_pad_(input_tensor, 0 /*left*/, pad_w /*right*/, 0 /*top*/, pad_h /*bottom*/, PAD_METHOD_BORDER) != RET_OK)
-        return RET_ERROR;
 
     argv[0] = input_tensor ;
     TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
@@ -49,9 +37,32 @@ int image_patch_client(FFCResNetGenerator *net, char *input_filename, char *outp
     //     tensor_destroy(xxxx_test);
     // }
     if (tensor_valid(output_tensor)) {
-        if (tensor_zeropad_(output_tensor, H, W) == RET_OK) {
-            tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
-        }
+        tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
+        tensor_destroy(output_tensor);
+    }
+    tensor_destroy(input_tensor);
+
+    return RET_OK;
+}
+
+int image_vitmat_predict(ViTMatte *net, char *input_filename, char *output_filename)
+{
+    TENSOR *argv[1];
+
+    printf("Matte %s to %s ...\n", input_filename, output_filename);
+    TENSOR *input_tensor = tensor_load_image(input_filename, 1 /*alpha*/);
+    check_tensor(input_tensor);
+
+    argv[0] = input_tensor ;
+    TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
+
+    // TENSOR *xxxx_test = net->get_output_tensor("pad2d");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** pad2d", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    if (tensor_valid(output_tensor)) {
+        tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
         tensor_destroy(output_tensor);
     }
     tensor_destroy(input_tensor);
@@ -60,7 +71,7 @@ int image_patch_client(FFCResNetGenerator *net, char *input_filename, char *outp
 }
 
 
-static void image_patch_help(char* cmd)
+static void image_matte_help(char* cmd)
 {
     printf("Usage: %s [option] image_files\n", cmd);
     printf("    -h, --help                   Display this help, version %s.\n", ENGINE_VERSION);
@@ -88,7 +99,7 @@ int main(int argc, char** argv)
     };
 
     if (argc <= 1)
-        image_patch_help(argv[0]);
+        image_matte_help(argv[0]);
 
 
     while ((optc = getopt_long(argc, argv, "h d: o:", long_opts, &option_index)) != EOF) {
@@ -101,7 +112,7 @@ int main(int argc, char** argv)
             break;
         case 'h': // help
         default:
-            image_patch_help(argv[0]);
+            image_matte_help(argv[0]);
             break;
         }
     }
@@ -110,17 +121,19 @@ int main(int argc, char** argv)
     if (optind == argc) // no input image, nothing to do ...
         return 0;
 
-    FFCResNetGenerator net;
+    // ISNetDIS net;
+    ViTMatte net;
 
     // load net weight ...
     GGMLModel model;
     {
-        check_point(model.preload("models/image_patch_f32.gguf") == RET_OK);
+        // check_point(model.preload("models/image_netdis_f32.gguf") == RET_OK);
+        check_point(model.preload("models/image_vitmat_f32.gguf") == RET_OK);
 
         // -----------------------------------------------------------------------------------------
         net.set_device(device_no);
         net.start_engine();
-        // net.dump();
+        net.dump();
     }
 
     for (int i = optind; i < argc; i++) {
@@ -132,7 +145,9 @@ int main(int argc, char** argv)
         }
 
         net.load_weight(&model, "");
-        image_patch_client(&net, argv[i], output_filename);
+        // image_netdis_predict(&net, argv[i], output_filename);
+
+        image_vitmat_predict(&net, argv[i], output_filename);
     }
 
     // free network ...
