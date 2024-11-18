@@ -62,6 +62,8 @@ int image_vitmat_predict(ViTMatte *net, char *input_filename, char *output_filen
     //     tensor_destroy(xxxx_test);
     // }
     if (tensor_valid(output_tensor)) {
+        tensor_show("---- output_tensor", output_tensor);
+
         tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
         tensor_destroy(output_tensor);
     }
@@ -133,7 +135,7 @@ int main(int argc, char** argv)
         // -----------------------------------------------------------------------------------------
         net.set_device(device_no);
         net.start_engine();
-        net.dump();
+        // net.dump();
     }
 
     for (int i = optind; i < argc; i++) {

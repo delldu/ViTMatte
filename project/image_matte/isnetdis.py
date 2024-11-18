@@ -360,8 +360,8 @@ class ISNetDIS(nn.Module):
         self.side6 = nn.Conv2d(512, out_ch, 3, padding=1)
 
         self.load_weights()
-        from ggml_engine import create_network
-        create_network(self)
+        # from ggml_engine import create_network
+        # create_network(self)
 
     def load_weights(self, model_path="models/isnetdis.pth"):
         cdir = os.path.dirname(__file__)

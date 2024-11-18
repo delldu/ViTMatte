@@ -117,6 +117,8 @@ def image_matte_predict(input_files, output_dir):
         B, C, H, W = input_tensor.size()
         s = min(min(model1.MAX_H / H, model1.MAX_W / W), 1.0)
         SH, SW = int(s * H), int(s * W)
+        print(f"Input image size: {SH}x{SW} ...")
+
         input_tensor = F.interpolate(input_tensor, size=(SH, SW), mode="bilinear", align_corners=False)
 
         trimap = input_tensor[:, 3:4, :, :]
@@ -128,11 +130,14 @@ def image_matte_predict(input_files, output_dir):
 
         # print(f"{filename}: unkown_area_ratio = {unkown_area_ratio} ...")
         if unkown_area_ratio < 0.05:
+            print("Running model netdis ...")
             # pytorch recommand clone.detach instead of torch.Tensor(input_tensor)
             # orig_tensor = input_tensor.clone().detach()
             with torch.no_grad():
                 input_tensor = model1(input_tensor[:, 0:3, :, :].to(device))
         else:
+            print("Running model vitmat ...")
+
             # need set trimap in (0.1, 0.9) erea as 0.5
             mask1 = (trimap < 0.9)
             mask2 = (trimap > 0.1)
