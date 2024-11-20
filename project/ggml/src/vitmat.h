@@ -10,6 +10,7 @@
 ggml_tensor_t *get_abs_pos(struct ggml_context* ctx, ggml_tensor_t* abs_pos, int H, int W);
 ggml_tensor_t *attn_add_rel_pos(struct ggml_context* ctx, ggml_tensor_t* attn, ggml_tensor_t* q,
     ggml_tensor_t* rel_pos_h, ggml_tensor_t* rel_pos_w, int H, int W);
+struct ggml_tensor* get_rel_pos(struct ggml_context* ctx, struct ggml_tensor* a, int qh, int kh);
 
 /*
  BasicConv3x3(
@@ -199,13 +200,25 @@ struct FusionBlock {
     }
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, ggml_tensor_t* dn) {
+        // up = F.interpolate(x, scale_factor=2.0, mode='bilinear', align_corners=False)
+        // out = torch.cat([D, up], dim=1)
+        // out = self.conv(out)
+
+        // return out   
+
         int W = (int)x->ne[0];
         int H = (int)x->ne[1];
         int C = (int)x->ne[2];
         int B = (int)x->ne[3];
 
         ggml_tensor_t *up = ggml_upscale_ext(ctx, x, 2*W, 2*H, C, B);
+        CheckPoint("FusionBlock 1");
+        ggml_tensor_dump("x", x);
+        ggml_tensor_dump("dn", dn);
+        ggml_tensor_dump("up", up);
         ggml_tensor_t *out = ggml_concat(ctx, dn, up, 2 /*dim on channel*/);
+        CheckPoint("FusionBlock 2");
+
         out = conv.forward(ctx, out);
 
     	return out;
@@ -401,14 +414,37 @@ struct DetailCapture {
         //         features = m(features, detail_features[len(self.fusion_blks)-i-1]) # D3, D2, D1, D0
             
         //     return torch.sigmoid(self.matting_head(features))
+
+        // tensor [features] size: [1, 384, 64, 43], min: -9.721466, max: 27.064917, mean: 0.036542
+        // tensor [images] size: [1, 4, 1024, 688], min: -2.117904, max: 2.64, mean: -0.247312
+        // detail_features is list: len = 4
+        //     tensor [item] size: [1, 4, 1024, 688], min: -2.117904, max: 2.64, mean: -0.247312
+        //     tensor [item] size: [1, 48, 512, 344], min: 0.0, max: 18.381886, mean: 0.468337
+        //     tensor [item] size: [1, 96, 256, 172], min: 0.0, max: 19.386992, mean: 0.449869
+        //     tensor [item] size: [1, 192, 128, 86], min: 0.0, max: 19.881739, mean: 0.502548
+        // tensor [features2] size: [1, 32, 1024, 688], min: 0.0, max: 5.583046, mean: 0.26782
+
+        ggml_tensor_dump("features", features);
+        ggml_tensor_dump("images", images);
+
         std::vector<ggml_tensor_t *> detail_features = convstream.forward(ctx, images);
+        ggml_tensor_dump("detail_features[3]", detail_features[3]);
+        ggml_tensor_dump("detail_features[3]", detail_features[2]);
+        ggml_tensor_dump("detail_features[3]", detail_features[1]);
+        ggml_tensor_dump("detail_features[3]", detail_features[0]);
 
         features = fusion_blks_0.forward(ctx, features, detail_features[3]);
+        ggml_tensor_dump("features0", features);
         features = fusion_blks_1.forward(ctx, features, detail_features[2]);
+        ggml_tensor_dump("features1", features);
+
         features = fusion_blks_2.forward(ctx, features, detail_features[1]);
+        ggml_tensor_dump("features2", features);
         features = fusion_blks_3.forward(ctx, features, detail_features[0]);
+        ggml_tensor_dump("features3", features);
 
         features = matting_head.forward(ctx, features);
+        ggml_tensor_dump("features4", features);
 
     	return features;
     }
@@ -440,17 +476,32 @@ struct CustomLayerNorm {
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x)
     {
+        int C = x->ne[2];
+
+        // CheckPoint("norm1");
         ggml_tensor_t *u = ggml_nn_mean(ctx, x, 2/*dim on channel*/);
         ggml_tensor_t *d = ggml_sub(ctx, x, u);
         ggml_tensor_t *s = ggml_mul(ctx, d, d);
+
+        // CheckPoint("norm2");
         s = ggml_nn_mean(ctx, s, 2 /*dim on channel*/);
         s = ggml_nn_add(ctx, s, eps);
         s = ggml_sqrt(ctx, s);
         x = ggml_div(ctx, d, s);
 
+        // CheckPoint("norm3");
+        // ggml_tensor_dump("norm3 x", x);
+        // ggml_tensor_dump("norm3 w", w);
+        // ggml_tensor_dump("norm3 b", b);
+
         // ------------------------------------------------
+        w = ggml_reshape_4d(ctx, w, 1, 1, C, 1);
+        b = ggml_reshape_4d(ctx, b, 1, 1, C, 1);
+
         x = ggml_mul(ctx, x, w);
         x = ggml_add(ctx, x, b);
+
+        // CheckPoint("norm4");
 
         return x;
     }
@@ -539,17 +590,26 @@ struct ResBottleneckBlock {
         // return out
         ggml_tensor_t *out = x;
         out = conv1.forward(ctx, out);
+        CheckPoint("res1, bottleneck_channels = %d", bottleneck_channels);
+        ggml_tensor_dump("==> res1", out);
+
         out = norm1.forward(ctx, out);
         out = ggml_relu(ctx, out);
+        CheckPoint("res2");
 
         out = conv2.forward(ctx, out);
         out = norm2.forward(ctx, out);
         out = ggml_relu(ctx, out);
+        CheckPoint("res3");
 
         out = conv3.forward(ctx, out);
         out = norm3.forward(ctx, out);
+        CheckPoint("res4");
 
-    	return ggml_add(ctx, x, out);
+    	x = ggml_add(ctx, x, out);
+        CheckPoint("res5");
+
+        return x;        
     }
 };
 
@@ -607,63 +667,43 @@ struct Attention {
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         // B, H, W, C = x.size(), [20, 14, 14, 384] --> [20, 196, 3*6, 64]
-        ggml_tensor_dump("xxxx-0", x);
-        // xxxx-0    f32 [384, 14, 14, 20], 
+        int C = (int)x->ne[0];
+        int W = (int)x->ne[1];
+        int H = (int)x->ne[2];
+        int B = (int)x->ne[3];
+
         ggml_tensor_t *y = qkv.forward(ctx, x);
-        // f32 [1152, 14, 14, 20], 
-        int C = (int)y->ne[0];
-        int W = (int)y->ne[1];
-        int H = (int)y->ne[2];
-        int B = (int)y->ne[3];
-
-        y = ggml_reshape_3d(ctx, y, C, W*H, B); // torch -- [B, H*W, C]
-        // f32 [1152, 196, 20, 1]
         y = ggml_reshape_4d(ctx, y, head_dim, 3*num_heads, W*H, B); // torch -- [B, H*W, 18, 64]
-        // f32 [64, 18, 196, 20]
-
         ggml_tensor_t *q = ggml_nn_slice(ctx, y, 1/*dim*/, 0*num_heads, 1*num_heads, 1 /*step*/);
         ggml_tensor_t *k = ggml_nn_slice(ctx, y, 1/*dim*/, 1*num_heads, 2*num_heads, 1 /*step*/);
         ggml_tensor_t *v = ggml_nn_slice(ctx, y, 1/*dim*/, 2*num_heads, 3*num_heads, 1 /*step*/);
 
-
         // q, k, v f32 [64, 6, 196, 20] --> [64, 196, 120]
         q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
         q = ggml_reshape_3d(ctx, q, head_dim, H*W, num_heads * B);
+
         k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
         k = ggml_reshape_3d(ctx, k, head_dim, H*W, num_heads * B);
+
         v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3)); // [64, 6, 196, 20] -> [64, 196, 6, 20]
         v = ggml_reshape_3d(ctx, v, head_dim, H*W, num_heads * B);
-
-        ggml_tensor_dump("xxxx-q", q);
-        ggml_tensor_dump("xxxx-k", k);
-        ggml_tensor_dump("xxxx-v", v);
-        // xxxx-q    f32 [64, 196, 120, 1],  (reshaped) (reshaped) (view) (permuted) (cont) (reshaped)
-        // xxxx-k    f32 [64, 196, 120, 1],  (reshaped) (reshaped) (view) (permuted) (cont) (reshaped)
-        // xxxx-v    f32 [64, 196, 120, 1],  (reshaped) (reshaped) (view) (permuted) (cont) (reshaped)
-
-        // tensor [q] size: [120, 196, 64], min: -7.246001, max: 7.225435, mean: 0.013729
-        // tensor [k] size: [120, 196, 64], min: -4.340517, max: 5.398939, mean: -0.005646
-        // tensor [v] size: [120, 196, 64], min: -3.037579, max: 2.913018, mean: -0.00689
-        // --------------------------------------------------------------------------------
-        // tensor [q] size: [6, 2752, 64], min: -5.022454, max: 6.156191, mean: 0.04893
-        // tensor [k] size: [6, 2752, 64], min: -4.626931, max: 4.908943, mean: 0.058036
-        // tensor [v] size: [6, 2752, 64], min: -1.974799, max: 3.875605, mean: 0.006271
 
         ggml_tensor_t* q_scale = ggml_scale(ctx, q, scale);
         ggml_tensor_t* k_transpose = ggml_transpose(ctx, k); 
         ggml_tensor_t *attn = ggml_nn_mul_mat(ctx, q_scale, k_transpose);
-        ggml_tensor_dump("xxxx-attn1", attn);
-        // attn    f32 [196, 196, 120, 1], 
-        // tensor [attn1] size: [120, 196, 196], min: -19.937408, max: 14.033832, mean: -0.309487
-        // ===================================================================================
 
+        // ----------------------------------------------------
         attn = attn_add_rel_pos(ctx, attn, q, rel_pos_h, rel_pos_w, H, W);
+
+
         attn = ggml_soft_max(ctx, attn);
+
+        ggml_tensor_dump("attn-1", attn);
+        ggml_tensor_dump("v", v);
         attn = ggml_nn_mul_mat(ctx, attn, v); // [120, 196, 64]
-        ggml_tensor_dump("xxxx-attn2", attn);
+        ggml_tensor_dump("attn-2", attn);
 
         // test_reshape_case
-
         // x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
         // # [120, 196, 64] -> [20, 6, 14, 14, 64] -> [20, 14, 14, 6, 64] -> [20, 14, 14, 384]
         // # ggml: [120, 196, 64] -> [20, 6, 196, 64] -> [20, 196, 6, 64] -> [20, 196, 384] -> [20, 14, 14, 384]
@@ -671,11 +711,21 @@ struct Attention {
         // x = self.proj(x)
         // # tensor [x] size: [20, 14, 14, 384], min: -477.986969, max: 1045.842041, mean: -1.808324
         x = ggml_reshape_4d(ctx, attn, head_dim, W*H, num_heads, B);
-        x = ggml_cont(ctx, ggml_permute(ctx, x, 0, 2, 1, 3)); // [64, 196, 6, 20] -> [64, 6, 196, 20]
-        x = ggml_reshape_3d(ctx, x, num_heads * head_dim, W*H, B); // [384, 196, 20]
-        x = ggml_reshape_4d(ctx, x, num_heads * head_dim, W, H, B); // [384, 14, 14, 20]
+        ggml_tensor_dump("attn-3", x); // [64, 2752, 6, 1]
 
-        x = proj.forward(ctx, x);
+        x = ggml_cont(ctx, ggml_permute(ctx, x, 0, 2, 1, 3)); // [64, 196, 6, 20] -> [64, 6, 196, 20]
+        ggml_tensor_dump("attn-4", x); // [64, 6, 2752, 1]
+        x = ggml_reshape_3d(ctx, x, num_heads * head_dim, W*H, B); // [384, 196, 20]
+        ggml_tensor_dump("attn-5", x); // [384, 2752, 1, 1]
+        x = ggml_reshape_4d(ctx, x, num_heads * head_dim, W, H, B); // [384, 14, 14, 20]
+        ggml_tensor_dump("attn-6", x); // [384, 43, 64, 1]
+
+        x = proj.forward(ctx, x); // f32 [384, 14, 14, 20], 
+        ggml_tensor_dump("attn-7", x); // [384, 43, 64, 1]
+
+        // tensor [---- Attention output] size: [20, 14, 14, 384], min: -0.34561, max: 0.4639, mean: 0.000979
+        // tensor [---- Attention output] size: [1, 64, 43, 384], min: -0.486019, max: 0.83199, mean: 0.019024
+
         return x;
     }
 };
@@ -776,25 +826,29 @@ struct BlockForZeroWindow {
         ggml_tensor_t *shortcut = x;
         x = norm1.forward(ctx, x);
         x = attn.forward(ctx, x);
+
         x = ggml_add(ctx, x, shortcut);
 
         ggml_tensor_t *y = norm2.forward(ctx, x);
+
         y = mlp.forward(ctx, y);
         x = ggml_add(ctx, x, y);
+
         // # x.size() -- [1, 64, 43, 384]
         // # x.permute(0, 3, 1, 2).size() -- [1, 384, 64, 43]
 
         // x = self.residual(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
         // # [1, 384, 64, 43] -> [1, 64, 43, 384]
-        x = ggml_permute(ctx, x, 1, 2, 0, 3); // [384, 43, 64, 1] -> [43, 64, 384, 1]/[C, W, H, B] -> [W, H, C, B]
-        x = ggml_cont(ctx, x);
-        ggml_tensor_dump("----> xxx", x);
+        x = ggml_cont(ctx, ggml_permute(ctx, x, 2, 0, 1, 3)); // [384, 43, 64, 1] -> [43, 64, 384, 1]/[C, W, H, B] -> [W, H, C, B]
+        // --xxx1    f32 [384, 43, 64, 1], 
+        // --xxx2    f32 [43, 64, 384, 1],  (permuted)
+        // # x.size() -- [1, 64, 43, 384]
+        // # x.permute(0, 3, 1, 2).size() -- [1, 384, 64, 43]
 
         y = residual.forward(ctx, x);
-        y = ggml_permute(ctx, y, 2, 0, 1, 3); // [43, 64, 384, 1]->[384, 43, 64, 1]/[W, H, C, B] -> [C, W, H, B]
-        y = ggml_cont(ctx, y);
+        y = ggml_cont(ctx, ggml_permute(ctx, y, 1, 2, 0, 3)); // [43, 64, 384, 1]->[384, 43, 64, 1]/[W, H, C, B] -> [C, W, H, B]
 
-        ggml_tensor_dump("----> yyy", y);
+        CheckPoint("BlockForZeroWindow 6");
 
     	return y;
     }
@@ -883,16 +937,22 @@ struct BlockForNormalWindow {
         // x = x + self.mlp(self.norm2(x))
         // return x
 
-        int W = (int)x->ne[0];
-        int H = (int)x->ne[1];
-        int C = (int)x->ne[2];
+        int C = (int)x->ne[0];
+        int W = (int)x->ne[1];
+        int H = (int)x->ne[2];
         int B = (int)x->ne[3];
+        // self-attn: x1    f32 [384, 43, 64, 1], 
 
         ggml_tensor_t *shortcut = x;
         x = norm1.forward(ctx, x);
         x = ggml_win_part(ctx, x, window_size); // window_size -- 14
         x = attn.forward(ctx, x);
+        // [384, 14, 14, 20]
+        // tensor [self-attn: x] size: [20, 14, 14, 384], min: -7.174149, max: 1.417144, mean: -0.005509
+        CheckPoint("BlockForNormalWindow 1");
         x = ggml_win_unpart(ctx, x, W, H, window_size); // window_size -- 14
+        CheckPoint("BlockForNormalWindow 2");
+
         x = ggml_add(ctx, x, shortcut);
 
         ggml_tensor_t *y = norm2.forward(ctx, x);
@@ -1192,6 +1252,8 @@ struct ViT {
 
         // # tensor [x] size: [1, 64, 43, 384], min: -10.419563, max: 32.650574, mean: 0.029471
         // return x.permute(0, 3, 1, 2) # [1, 64, 43, 384] -> [1, 384, 64, 43] -- (B, C, H, W)
+
+        CheckPoint("vit0");
         x = patch_embed.forward(ctx, x);
 
         int C = (int)x->ne[0];
@@ -1202,24 +1264,33 @@ struct ViT {
         x = ggml_add(ctx, x, rel_pos);
         // tensor [get_abs_pos] size: [1, 64, 43, 384], min: -1.792006, max: 6.911754, mean: 0.017271
 
+        CheckPoint("vit1");
         x = blocks_0.forward(ctx, x);
+        CheckPoint("vit2");
         x = blocks_1.forward(ctx, x);
+        CheckPoint("vit3");
         x = blocks_2.forward(ctx, x);
+        CheckPoint("vit3");
         x = blocks_3.forward(ctx, x);
+        CheckPoint("vit4");
         x = blocks_4.forward(ctx, x);
+        CheckPoint("vit5");
         x = blocks_5.forward(ctx, x);
+        CheckPoint("vit6");
         x = blocks_6.forward(ctx, x);
+        CheckPoint("vit7");
         x = blocks_7.forward(ctx, x);
+        CheckPoint("vit8");
         x = blocks_8.forward(ctx, x);
+        CheckPoint("vit9");
         x = blocks_9.forward(ctx, x);
+        CheckPoint("vit10");
         x = blocks_10.forward(ctx, x);
+        CheckPoint("vit11");
         x = blocks_11.forward(ctx, x);
-
-        ggml_tensor_dump("vit x1", x);
-        x = ggml_permute(ctx, x, 1, 2, 0, 3); // [C, W, H, B] -> [W, H, C, B]
-    	x = ggml_cont(ctx, x);
-
-        ggml_tensor_dump("vit x2", x);
+        CheckPoint("vit12");
+        x = ggml_cont(ctx, ggml_permute(ctx, x, 1, 2, 0, 3)); // [C, W, H, B] -> [W, H, C, B]
+        CheckPoint("vit13");
 
         return x;
     }
@@ -1511,17 +1582,21 @@ struct ViTMatte : GGMLNetwork {
         ggml_tensor_t *x3 = ggml_dup(ctx, images);
 
         images = normal.forward(ctx, images);
+        CheckPoint("concat 1");
         images = ggml_concat(ctx, images, trimap, 2 /*dim on channel*/);
+        CheckPoint("concat 2");
+
         // ----------------------------------------------
 
         ggml_tensor_t* features = backbone.forward(ctx, images);
-        ggml_tensor_dump("features", features);
-        return features;
-
+        // return features; // xxxx_debug
 
         ggml_tensor_t* mask = decoder.forward(ctx, features, images);
 
+        CheckPoint("concat 3");
         ggml_tensor_t* output = ggml_concat(ctx, x3, mask, 2/*dim on channels*/);
+        CheckPoint("concat 4");
+
         if (pad_h > 0 || pad_w > 0) {
             output = ggml_nn_slice(ctx, output, 0/*W*/, 0, W, 1/*step*/);
             output = ggml_nn_slice(ctx, output, 1/*H*/, 0, H, 1/*step*/);
