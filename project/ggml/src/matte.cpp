@@ -14,18 +14,18 @@ ggml_tensor_t *attn_add_rel_pos(struct ggml_context* ctx, ggml_tensor_t* attn, g
     int B = (int)q->ne[2];
     int C = (int)q->ne[0]; // head_dim
 
-    ggml_tensor_t* r_q = ggml_reshape_4d(ctx, q, C, W, H, B);
+    ggml_tensor_t* r_q = ggml_cont(ctx, ggml_reshape_4d(ctx, q, C, W, H, B));
 
     // rel_h = torch.einsum("bhwc,hkc->bhwk", r_q, r_h) # [120, 14, 14, 14]
     r_h = ggml_cont(ctx, ggml_transpose(ctx, r_h));
     ggml_tensor_t* rel_h = ggml_nn_mul_mat(ctx, r_q, r_h);
 
-    // rel_w = torch.einsum("bhwc,hkc->bhwk", r_q, r_w) # [120, 14, 14, 14]
+    // rel_w = torch.einsum("bhwc,wkc->bhwk", r_q, r_w) # [120, 14, 14, 14]
     int K = r_w->ne[1]; // CKH -- ggml dimensions ...
     r_w = ggml_cont(ctx, ggml_transpose(ctx, r_w));
     r_q = ggml_reshape_4d(ctx, r_q, C, 1, W, B*H);
     ggml_tensor_t* rel_w = ggml_nn_mul_mat(ctx, r_q, r_w);
-    rel_w = ggml_reshape_4d(ctx, rel_w, K, W, H, B);
+    rel_w = ggml_cont(ctx, ggml_reshape_4d(ctx, rel_w, K, W, H, B));
 
     // attn = (
     //     attn.view(B, H*W, H, W) + rel_h.reshape(B, H*W, H, 1) + rel_w.reshape(B, H*W, 1, W)
@@ -36,7 +36,7 @@ ggml_tensor_t *attn_add_rel_pos(struct ggml_context* ctx, ggml_tensor_t* attn, g
 
     attn = ggml_add(ctx, attn, rel_h);
     attn = ggml_add(ctx, attn, rel_w);
-    attn = ggml_reshape_3d(ctx, attn, W*H, W*H, B);
+    attn = ggml_cont(ctx, ggml_reshape_3d(ctx, attn, W*H, W*H, B));
 
     return attn;
 }
@@ -47,10 +47,13 @@ ggml_tensor_t *upsample_like(struct ggml_context* ctx, ggml_tensor_t* src, ggml_
 {
     int W = (int)dst->ne[0];
     int H = (int)dst->ne[1];
-    int C = (int)src->ne[2];
-    int B = (int)src->ne[3];
+    // int C = (int)src->ne[2];
+    // int B = (int)src->ne[3];
+    // return ggml_upscale_ext(ctx, src, W, H, C, B);
 
-    return ggml_upscale_ext(ctx, src, W, H, C, B);
+    src = ggml_interpolate(ctx, src, 0, W);
+    src = ggml_interpolate(ctx, src, 1, H);
+    return src;
 }
 
 ggml_tensor_t *get_abs_pos(struct ggml_context* ctx, ggml_tensor_t* abs_pos, int H, int W)
@@ -64,7 +67,9 @@ ggml_tensor_t *get_abs_pos(struct ggml_context* ctx, ggml_tensor_t* abs_pos, int
     GGML_ASSERT( HW == size * size);
 
     abs_pos = ggml_reshape_4d(ctx, abs_pos, C, size, size, B);
-    abs_pos = ggml_upscale_ext(ctx, abs_pos, C, W, H, B);
+    // abs_pos = ggml_upscale_ext(ctx, abs_pos, C, W, H, B);
+    abs_pos = ggml_interpolate(ctx, abs_pos, 1, W);
+    abs_pos = ggml_interpolate(ctx, abs_pos, 2, H);
 
     return abs_pos; // (size, size) --> (H, W)
 }

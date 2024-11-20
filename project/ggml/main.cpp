@@ -67,6 +67,28 @@ int image_vitmat_predict(ViTMatte *net, char *input_filename, char *output_filen
         tensor_destroy(xxxx_test);
     }
 
+    xxxx_test = net->get_output_tensor("back1");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** back1", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("back2");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** back2", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("back3");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** back3", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("back4");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** back4", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+
     if (tensor_valid(output_tensor)) {
         tensor_show("---- output_tensor", output_tensor);
 
