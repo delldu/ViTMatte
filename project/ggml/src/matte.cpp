@@ -146,6 +146,9 @@ struct ggml_tensor* get_rel_pos(struct ggml_context* ctx, struct ggml_tensor* a,
     if (a->ne[1] != M) {
         a = ggml_interpolate(ctx, a, 1 /*dim*/, M);
     }
+    a = ggml_cast(ctx, a, GGML_TYPE_F16);
+    a = ggml_get_rel_pos(ctx, a, qh, kh);
+    a = ggml_cast(ctx, a, GGML_TYPE_F32);
 
-    return ggml_get_rel_pos(ctx, a, qh, kh);
+    return a;
 }

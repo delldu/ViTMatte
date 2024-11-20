@@ -161,10 +161,22 @@ struct MattingHead {
     }
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        CheckPoint("h1");
+        ggml_tensor_dump("hx1", x);
         x = conv_0.forward(ctx, x);
+        CheckPoint("h1");
+        ggml_tensor_dump("hx2", x);
+
         x = bn_1.forward(ctx, x);
+        CheckPoint("h1");
+        ggml_tensor_dump("hx3", x);
+
         x = ggml_relu(ctx, x);
+        ggml_tensor_dump("hx4", x);
+
         x = conv_3.forward(ctx, x);
+        CheckPoint("h3");
+        ggml_tensor_dump("hx5", x);
 
     	return x;
     }
@@ -429,9 +441,18 @@ struct DetailCapture {
 
         std::vector<ggml_tensor_t *> detail_features = convstream.forward(ctx, images);
         ggml_tensor_dump("detail_features[3]", detail_features[3]);
-        ggml_tensor_dump("detail_features[3]", detail_features[2]);
-        ggml_tensor_dump("detail_features[3]", detail_features[1]);
-        ggml_tensor_dump("detail_features[3]", detail_features[0]);
+        ggml_tensor_dump("detail_features[2]", detail_features[2]);
+        ggml_tensor_dump("detail_features[1]", detail_features[1]);
+        ggml_tensor_dump("detail_features[0]", detail_features[0]);
+
+        // features    f32 [64, 384, 43, 1],  (permuted) (cont) (permuted) (cont)
+        // images    f32 [688, 1024, 4, 1], 
+        // detail_features[3]    f32 [86, 128, 192, 1], 
+        // detail_features[2]    f32 [172, 256, 96, 1], 
+        // detail_features[1]    f32 [344, 512, 48, 1], 
+        // detail_features[0]    f32 [688, 1024, 4, 1], 
+
+
 
         features = fusion_blks_0.forward(ctx, features, detail_features[3]);
         ggml_tensor_dump("features0", features);
@@ -1289,7 +1310,12 @@ struct ViT {
         CheckPoint("vit11");
         x = blocks_11.forward(ctx, x);
         CheckPoint("vit12");
-        x = ggml_cont(ctx, ggml_permute(ctx, x, 1, 2, 0, 3)); // [C, W, H, B] -> [W, H, C, B]
+
+        // [1, 64, 43, 384] -> [1, 384, 64, 43]
+        // # [384, 43, 64, 1] -> [43, 64, 384, 1]
+
+        x = ggml_cont(ctx, ggml_permute(ctx, x, 2, 0, 1, 3)); // [C, W, H, B] -> [W, H, C, B]
+
         CheckPoint("vit13");
 
         return x;
@@ -1592,6 +1618,7 @@ struct ViTMatte : GGMLNetwork {
         // return features; // xxxx_debug
 
         ggml_tensor_t* mask = decoder.forward(ctx, features, images);
+        mask = ggml_constant(ctx, mask, 1.0);
 
         CheckPoint("concat 3");
         ggml_tensor_t* output = ggml_concat(ctx, x3, mask, 2/*dim on channels*/);
@@ -1601,6 +1628,8 @@ struct ViTMatte : GGMLNetwork {
             output = ggml_nn_slice(ctx, output, 0/*W*/, 0, W, 1/*step*/);
             output = ggml_nn_slice(ctx, output, 1/*H*/, 0, H, 1/*step*/);
         }
+        output = ggml_cont(ctx, output);
+
         return output;
     }
 };
