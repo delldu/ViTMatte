@@ -106,7 +106,6 @@ struct Mlp {
     }
 };
 
-
 struct MattingHead {
     // network params
     struct Conv2d conv_0;
@@ -122,7 +121,6 @@ struct MattingHead {
         (3): Conv2d(16, 1, kernel_size=(1, 1), stride=(1, 1))
       )
     ) */
-
     void create_weight_tensors(struct ggml_context* ctx) {
         conv_0.in_channels = 32;
         conv_0.out_channels = 16;
@@ -161,22 +159,10 @@ struct MattingHead {
     }
 
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        CheckPoint("h1");
-        ggml_tensor_dump("hx1", x);
         x = conv_0.forward(ctx, x);
-        CheckPoint("h1");
-        ggml_tensor_dump("hx2", x);
-
         x = bn_1.forward(ctx, x);
-        CheckPoint("h1");
-        ggml_tensor_dump("hx3", x);
-
         x = ggml_relu(ctx, x);
-        ggml_tensor_dump("hx4", x);
-
         x = conv_3.forward(ctx, x);
-        CheckPoint("h3");
-        ggml_tensor_dump("hx5", x);
 
     	return x;
     }
@@ -217,26 +203,19 @@ struct FusionBlock {
         // out = self.conv(out)
 
         // return out   
-
         int W = (int)x->ne[0];
         int H = (int)x->ne[1];
         int C = (int)x->ne[2];
         int B = (int)x->ne[3];
 
         ggml_tensor_t *up = ggml_upscale_ext(ctx, x, 2*W, 2*H, C, B);
-        CheckPoint("FusionBlock 1");
-        ggml_tensor_dump("x", x);
-        ggml_tensor_dump("dn", dn);
-        ggml_tensor_dump("up", up);
         ggml_tensor_t *out = ggml_concat(ctx, dn, up, 2 /*dim on channel*/);
-        CheckPoint("FusionBlock 2");
 
         out = conv.forward(ctx, out);
 
     	return out;
     }
 };
-
 
 /*
  ConvStream(
@@ -436,36 +415,13 @@ struct DetailCapture {
         //     tensor [item] size: [1, 192, 128, 86], min: 0.0, max: 19.881739, mean: 0.502548
         // tensor [features2] size: [1, 32, 1024, 688], min: 0.0, max: 5.583046, mean: 0.26782
 
-        ggml_tensor_dump("features", features);
-        ggml_tensor_dump("images", images);
-
         std::vector<ggml_tensor_t *> detail_features = convstream.forward(ctx, images);
-        ggml_tensor_dump("detail_features[3]", detail_features[3]);
-        ggml_tensor_dump("detail_features[2]", detail_features[2]);
-        ggml_tensor_dump("detail_features[1]", detail_features[1]);
-        ggml_tensor_dump("detail_features[0]", detail_features[0]);
-
-        // features    f32 [64, 384, 43, 1],  (permuted) (cont) (permuted) (cont)
-        // images    f32 [688, 1024, 4, 1], 
-        // detail_features[3]    f32 [86, 128, 192, 1], 
-        // detail_features[2]    f32 [172, 256, 96, 1], 
-        // detail_features[1]    f32 [344, 512, 48, 1], 
-        // detail_features[0]    f32 [688, 1024, 4, 1], 
-
-
 
         features = fusion_blks_0.forward(ctx, features, detail_features[3]);
-        ggml_tensor_dump("features0", features);
         features = fusion_blks_1.forward(ctx, features, detail_features[2]);
-        ggml_tensor_dump("features1", features);
-
         features = fusion_blks_2.forward(ctx, features, detail_features[1]);
-        ggml_tensor_dump("features2", features);
         features = fusion_blks_3.forward(ctx, features, detail_features[0]);
-        ggml_tensor_dump("features3", features);
-
         features = matting_head.forward(ctx, features);
-        ggml_tensor_dump("features4", features);
 
     	return features;
     }
@@ -473,7 +429,7 @@ struct DetailCapture {
 
 /*
  LayerNorm() */
-
+// xxxx_debug
 struct CustomLayerNorm {
     int64_t normalized_shape;
     float eps = 1e-6;
@@ -499,21 +455,14 @@ struct CustomLayerNorm {
     {
         int C = x->ne[2];
 
-        // CheckPoint("norm1");
         ggml_tensor_t *u = ggml_nn_mean(ctx, x, 2/*dim on channel*/);
         ggml_tensor_t *d = ggml_sub(ctx, x, u);
         ggml_tensor_t *s = ggml_mul(ctx, d, d);
 
-        // CheckPoint("norm2");
         s = ggml_nn_mean(ctx, s, 2 /*dim on channel*/);
         s = ggml_nn_add(ctx, s, eps);
         s = ggml_sqrt(ctx, s);
         x = ggml_div(ctx, d, s);
-
-        // CheckPoint("norm3");
-        // ggml_tensor_dump("norm3 x", x);
-        // ggml_tensor_dump("norm3 w", w);
-        // ggml_tensor_dump("norm3 b", b);
 
         // ------------------------------------------------
         w = ggml_reshape_4d(ctx, w, 1, 1, C, 1);
@@ -521,8 +470,6 @@ struct CustomLayerNorm {
 
         x = ggml_mul(ctx, x, w);
         x = ggml_add(ctx, x, b);
-
-        // CheckPoint("norm4");
 
         return x;
     }
@@ -611,24 +558,18 @@ struct ResBottleneckBlock {
         // return out
         ggml_tensor_t *out = x;
         out = conv1.forward(ctx, out);
-        CheckPoint("res1, bottleneck_channels = %d", bottleneck_channels);
-        ggml_tensor_dump("==> res1", out);
 
         out = norm1.forward(ctx, out);
         out = ggml_relu(ctx, out);
-        CheckPoint("res2");
 
         out = conv2.forward(ctx, out);
         out = norm2.forward(ctx, out);
         out = ggml_relu(ctx, out);
-        CheckPoint("res3");
 
         out = conv3.forward(ctx, out);
         out = norm3.forward(ctx, out);
-        CheckPoint("res4");
 
     	x = ggml_add(ctx, x, out);
-        CheckPoint("res5");
 
         return x;        
     }
@@ -719,10 +660,7 @@ struct Attention {
 
         attn = ggml_soft_max(ctx, attn);
 
-        ggml_tensor_dump("attn-1", attn);
-        ggml_tensor_dump("v", v);
         attn = ggml_nn_mul_mat(ctx, attn, v); // [120, 196, 64]
-        ggml_tensor_dump("attn-2", attn);
 
         // test_reshape_case
         // x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
@@ -732,18 +670,12 @@ struct Attention {
         // x = self.proj(x)
         // # tensor [x] size: [20, 14, 14, 384], min: -477.986969, max: 1045.842041, mean: -1.808324
         x = ggml_reshape_4d(ctx, attn, head_dim, W*H, num_heads, B);
-        ggml_tensor_dump("attn-3", x); // [64, 2752, 6, 1]
 
         x = ggml_cont(ctx, ggml_permute(ctx, x, 0, 2, 1, 3)); // [64, 196, 6, 20] -> [64, 6, 196, 20]
-        ggml_tensor_dump("attn-4", x); // [64, 6, 2752, 1]
         x = ggml_reshape_3d(ctx, x, num_heads * head_dim, W*H, B); // [384, 196, 20]
-        ggml_tensor_dump("attn-5", x); // [384, 2752, 1, 1]
         x = ggml_reshape_4d(ctx, x, num_heads * head_dim, W, H, B); // [384, 14, 14, 20]
-        ggml_tensor_dump("attn-6", x); // [384, 43, 64, 1]
 
         x = proj.forward(ctx, x); // f32 [384, 14, 14, 20], 
-        ggml_tensor_dump("attn-7", x); // [384, 43, 64, 1]
-
         // tensor [---- Attention output] size: [20, 14, 14, 384], min: -0.34561, max: 0.4639, mean: 0.000979
         // tensor [---- Attention output] size: [1, 64, 43, 384], min: -0.486019, max: 0.83199, mean: 0.019024
 
@@ -869,8 +801,6 @@ struct BlockForZeroWindow {
         y = residual.forward(ctx, x);
         y = ggml_cont(ctx, ggml_permute(ctx, y, 1, 2, 0, 3)); // [43, 64, 384, 1]->[384, 43, 64, 1]/[W, H, C, B] -> [C, W, H, B]
 
-        CheckPoint("BlockForZeroWindow 6");
-
     	return y;
     }
 };
@@ -970,9 +900,7 @@ struct BlockForNormalWindow {
         x = attn.forward(ctx, x);
         // [384, 14, 14, 20]
         // tensor [self-attn: x] size: [20, 14, 14, 384], min: -7.174149, max: 1.417144, mean: -0.005509
-        CheckPoint("BlockForNormalWindow 1");
         x = ggml_win_unpart(ctx, x, W, H, window_size); // window_size -- 14
-        CheckPoint("BlockForNormalWindow 2");
 
         x = ggml_add(ctx, x, shortcut);
 
@@ -1031,157 +959,10 @@ struct PatchEmbed {
     }
 };
 
-/*
- ViT(
-  (patch_embed): PatchEmbed(
-    (proj): Conv2d(4, 384, kernel_size=(16, 16), stride=(16, 16))
-  )
-  (blocks): ModuleList(
-    (2): BlockForZeroWindow(
-      (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (attn): Attention(
-        (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        (proj): Linear(in_features=384, out_features=384, bias=True)
-      )
-      (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (mlp): Mlp(
-        (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (fc2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-      (residual): ResBottleneckBlock(
-        (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm1): LayerNorm()
-        (act1): GELU(approximate='none')
-        (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-        (norm2): LayerNorm()
-        (act2): GELU(approximate='none')
-        (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm3): LayerNorm()
-      )
-    )
-    (3-4): 2 x BlockForNormalWindow(
-      (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (attn): Attention(
-        (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        (proj): Linear(in_features=384, out_features=384, bias=True)
-      )
-      (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (mlp): Mlp(
-        (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (fc2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-    )
-    (5): BlockForZeroWindow(
-      (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (attn): Attention(
-        (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        (proj): Linear(in_features=384, out_features=384, bias=True)
-      )
-      (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (mlp): Mlp(
-        (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (fc2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-      (residual): ResBottleneckBlock(
-        (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm1): LayerNorm()
-        (act1): GELU(approximate='none')
-        (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-        (norm2): LayerNorm()
-        (act2): GELU(approximate='none')
-        (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm3): LayerNorm()
-      )
-    )
-    (6-7): 2 x BlockForNormalWindow(
-      (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (attn): Attention(
-        (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        (proj): Linear(in_features=384, out_features=384, bias=True)
-      )
-      (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (mlp): Mlp(
-        (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (fc2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-    )
-    (8): BlockForZeroWindow(
-      (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (attn): Attention(
-        (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        (proj): Linear(in_features=384, out_features=384, bias=True)
-      )
-      (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (mlp): Mlp(
-        (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (fc2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-      (residual): ResBottleneckBlock(
-        (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm1): LayerNorm()
-        (act1): GELU(approximate='none')
-        (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-        (norm2): LayerNorm()
-        (act2): GELU(approximate='none')
-        (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm3): LayerNorm()
-      )
-    )
-    (9-10): 2 x BlockForNormalWindow(
-      (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (attn): Attention(
-        (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        (proj): Linear(in_features=384, out_features=384, bias=True)
-      )
-      (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (mlp): Mlp(
-        (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (fc2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-    )
-    (11): BlockForZeroWindow(
-      (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (attn): Attention(
-        (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        (proj): Linear(in_features=384, out_features=384, bias=True)
-      )
-      (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-      (mlp): Mlp(
-        (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (fc2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-      (residual): ResBottleneckBlock(
-        (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm1): LayerNorm()
-        (act1): GELU(approximate='none')
-        (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-        (norm2): LayerNorm()
-        (act2): GELU(approximate='none')
-        (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-        (norm3): LayerNorm()
-      )
-    )
-  )
-) */
 
 struct ViT {
-    // network hparams
-
-    // num_patches = (224 // patch_size) * (224 // patch_size) # 14 * 14 ==> 196
-    // num_positions = (num_patches + 1) # 197
-
-    // self.pos_embed = nn.Parameter(torch.zeros(1, num_positions, embed_dim)) # size() -- [1, 197, 384]
-
     ggml_tensor_t* pos_embed;
 
-    // network params
     struct PatchEmbed patch_embed;
     struct BlockForNormalWindow blocks_0;
     struct BlockForNormalWindow blocks_1;
@@ -1202,22 +983,8 @@ struct ViT {
         pos_embed = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 384, 197, 1);
 
         patch_embed.create_weight_tensors(ctx);
-        // (0-1): 2 x BlockForNormalWindow(
-        //   (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        //   (attn): Attention(
-        //     (qkv): Linear(in_features=384, out_features=1152, bias=True)
-        //     (proj): Linear(in_features=384, out_features=384, bias=True)
-        //   )
-        //   (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        //   (mlp): Mlp(
-        //     (fc1): Linear(in_features=384, out_features=1536, bias=True)
-        //     (act): GELU(approximate='none')
-        //     (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        //   )
-        // )
         blocks_0.create_weight_tensors(ctx);
         blocks_1.create_weight_tensors(ctx);
-
         blocks_2.create_weight_tensors(ctx);
         blocks_3.create_weight_tensors(ctx);
         blocks_4.create_weight_tensors(ctx);
@@ -1274,7 +1041,6 @@ struct ViT {
         // # tensor [x] size: [1, 64, 43, 384], min: -10.419563, max: 32.650574, mean: 0.029471
         // return x.permute(0, 3, 1, 2) # [1, 64, 43, 384] -> [1, 384, 64, 43] -- (B, C, H, W)
 
-        CheckPoint("vit0");
         x = patch_embed.forward(ctx, x);
 
         int C = (int)x->ne[0];
@@ -1285,257 +1051,26 @@ struct ViT {
         x = ggml_add(ctx, x, rel_pos);
         // tensor [get_abs_pos] size: [1, 64, 43, 384], min: -1.792006, max: 6.911754, mean: 0.017271
 
-        CheckPoint("vit1");
         x = blocks_0.forward(ctx, x);
-        CheckPoint("vit2");
         x = blocks_1.forward(ctx, x);
-        CheckPoint("vit3");
         x = blocks_2.forward(ctx, x);
-        CheckPoint("vit3");
         x = blocks_3.forward(ctx, x);
-        CheckPoint("vit4");
         x = blocks_4.forward(ctx, x);
-        CheckPoint("vit5");
         x = blocks_5.forward(ctx, x);
-        CheckPoint("vit6");
         x = blocks_6.forward(ctx, x);
-        CheckPoint("vit7");
         x = blocks_7.forward(ctx, x);
-        CheckPoint("vit8");
         x = blocks_8.forward(ctx, x);
-        CheckPoint("vit9");
         x = blocks_9.forward(ctx, x);
-        CheckPoint("vit10");
         x = blocks_10.forward(ctx, x);
-        CheckPoint("vit11");
         x = blocks_11.forward(ctx, x);
-        CheckPoint("vit12");
 
-        // [1, 64, 43, 384] -> [1, 384, 64, 43]
         // # [384, 43, 64, 1] -> [43, 64, 384, 1]
-
         x = ggml_cont(ctx, ggml_permute(ctx, x, 2, 0, 1, 3)); // [C, W, H, B] -> [W, H, C, B]
-
-        CheckPoint("vit13");
 
         return x;
     }
 };
 
-/*
- ViTMatte(
-  (backbone): ViT(
-    (patch_embed): PatchEmbed(
-      (proj): Conv2d(4, 384, kernel_size=(16, 16), stride=(16, 16))
-    )
-    (blocks): ModuleList(
-      (0-1): 2 x BlockForNormalWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-      )
-      (2): BlockForZeroWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-        (residual): ResBottleneckBlock(
-          (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm1): LayerNorm()
-          (act1): GELU(approximate='none')
-          (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (norm2): LayerNorm()
-          (act2): GELU(approximate='none')
-          (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm3): LayerNorm()
-        )
-      )
-      (3-4): 2 x BlockForNormalWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-      )
-      (5): BlockForZeroWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-        (residual): ResBottleneckBlock(
-          (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm1): LayerNorm()
-          (act1): GELU(approximate='none')
-          (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (norm2): LayerNorm()
-          (act2): GELU(approximate='none')
-          (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm3): LayerNorm()
-        )
-      )
-      (6-7): 2 x BlockForNormalWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-      )
-      (8): BlockForZeroWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-        (residual): ResBottleneckBlock(
-          (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm1): LayerNorm()
-          (act1): GELU(approximate='none')
-          (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (norm2): LayerNorm()
-          (act2): GELU(approximate='none')
-          (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm3): LayerNorm()
-        )
-      )
-      (9-10): 2 x BlockForNormalWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-      )
-      (11): BlockForZeroWindow(
-        (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (attn): Attention(
-          (qkv): Linear(in_features=384, out_features=1152, bias=True)
-          (proj): Linear(in_features=384, out_features=384, bias=True)
-        )
-        (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
-        (mlp): Mlp(
-          (fc1): Linear(in_features=384, out_features=1536, bias=True)
-          (act): GELU(approximate='none')
-          (fc2): Linear(in_features=1536, out_features=384, bias=True)
-        )
-        (residual): ResBottleneckBlock(
-          (conv1): Conv2d(384, 192, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm1): LayerNorm()
-          (act1): GELU(approximate='none')
-          (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (norm2): LayerNorm()
-          (act2): GELU(approximate='none')
-          (conv3): Conv2d(192, 384, kernel_size=(1, 1), stride=(1, 1), bias=False)
-          (norm3): LayerNorm()
-        )
-      )
-    )
-  )
-  (decoder): DetailCapture(
-    (convstream): ConvStream(
-      (convs): ModuleList(
-        (0): BasicConv3x3(
-          (conv): Conv2d(4, 48, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
-          (bn): BatchNorm2d(48, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-          (relu): ReLU()
-        )
-        (1): BasicConv3x3(
-          (conv): Conv2d(48, 96, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
-          (bn): BatchNorm2d(96, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-          (relu): ReLU()
-        )
-        (2): BasicConv3x3(
-          (conv): Conv2d(96, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
-          (bn): BatchNorm2d(192, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-          (relu): ReLU()
-        )
-      )
-    )
-    (fusion_blks): ModuleList(
-      (0): FusionBlock(
-        (conv): BasicConv3x3(
-          (conv): Conv2d(576, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (bn): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-          (relu): ReLU()
-        )
-      )
-      (1): FusionBlock(
-        (conv): BasicConv3x3(
-          (conv): Conv2d(352, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-          (relu): ReLU()
-        )
-      )
-      (2): FusionBlock(
-        (conv): BasicConv3x3(
-          (conv): Conv2d(176, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (bn): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-          (relu): ReLU()
-        )
-      )
-      (3): FusionBlock(
-        (conv): BasicConv3x3(
-          (conv): Conv2d(68, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-          (bn): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-          (relu): ReLU()
-        )
-      )
-    )
-    (matting_head): MattingHead(
-      (matting_convs): Sequential(
-        (0): Conv2d(32, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (1): BatchNorm2d(16, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-        (2): ReLU()
-        (3): Conv2d(16, 1, kernel_size=(1, 1), stride=(1, 1))
-      )
-    )
-  )
-  (normal): Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-) */
 
 struct ViTMatte : GGMLNetwork {
     // network hparams
@@ -1569,31 +1104,12 @@ struct ViTMatte : GGMLNetwork {
         normal.setup_weight_names(s);
     }
 
-    // ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
     ggml_tensor_t* forward(ggml_context_t* ctx, int argc, ggml_tensor_t* argv[]) {
         GGML_UNUSED(argc);
         ggml_tensor_t* x = argv[0];
         // '''
         //     x is Bx4xHxW tensor, alpha channel of x is trimap
         // '''
-        // B, C, H, W = x.size() # [1, 4, 672, 992]
-
-        // pad_h = (self.MAX_TIMES - (H % self.MAX_TIMES)) % self.MAX_TIMES
-        // pad_w = (self.MAX_TIMES - (W % self.MAX_TIMES)) % self.MAX_TIMES
-        // x = F.pad(x, (0, pad_w, 0, pad_h), 'reflect')
-
-        // # normalize
-        // images = x[:, 0:3, :, :]
-        // trimap = x[:, 3:4, :, :]
-        // images = self.normal(images)
-
-        // images = torch.cat((images, trimap), dim=1)
-        // features = self.backbone(images)            # size() -- [1, 384, 42, 62]
-        // mask = self.decoder(features, images)       # size() -- [1, 1, 672, 992]
-
-        // output = torch.cat((x[:, 0:3, :, :], mask), dim=1)
-
-        // return output[:, :, 0:H, 0:W]
         int W = (int)x->ne[0];
         int H = (int)x->ne[1];
         int C = (int)x->ne[2];
@@ -1608,21 +1124,26 @@ struct ViTMatte : GGMLNetwork {
         ggml_tensor_t *x3 = ggml_dup(ctx, images);
 
         images = normal.forward(ctx, images);
-        CheckPoint("concat 1");
         images = ggml_concat(ctx, images, trimap, 2 /*dim on channel*/);
-        CheckPoint("concat 2");
+        ggml_set_name(images, "images");
+        ggml_set_output(images);
+        // Info: ---- output_tensor Tensor: 1x4x1024x688
+        // min: -2.1179, max: 2.6400, mean: -0.2472
+        // tensor [images] size: [1, 4, 1024, 688], min: -2.117904, max: 2.64, mean: -0.247312
 
         // ----------------------------------------------
-
         ggml_tensor_t* features = backbone.forward(ctx, images);
-        // return features; // xxxx_debug
+        ggml_set_name(features, "features");
+        ggml_set_output(features);
+        // Info: ---- output_tensor Tensor: 1x384x64x43
+        // min: -5.3773, max: 26.7894, mean: -0.0015
+        // tensor [features] size: [1, 384, 64, 43], min: -9.258712, max: 29.229065, mean: 0.025887
 
         ggml_tensor_t* mask = decoder.forward(ctx, features, images);
-        mask = ggml_constant(ctx, mask, 1.0);
+        ggml_set_name(mask, "mask");
+        ggml_set_output(mask);
 
-        CheckPoint("concat 3");
         ggml_tensor_t* output = ggml_concat(ctx, x3, mask, 2/*dim on channels*/);
-        CheckPoint("concat 4");
 
         if (pad_h > 0 || pad_w > 0) {
             output = ggml_nn_slice(ctx, output, 0/*W*/, 0, W, 1/*step*/);

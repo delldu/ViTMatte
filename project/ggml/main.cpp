@@ -31,38 +31,6 @@ int image_netdis_predict(ISNetDIS *net, char *input_filename, char *output_filen
     argv[0] = input_tensor ;
     TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
 
-    TENSOR *xxxx_test = net->get_output_tensor("r_h");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** r_h", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("r_w");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** r_w", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("r_q");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** r_q", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("rel_h");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** rel_h", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("rel_w");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** rel_w", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("attn");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** attn", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-
-
     if (tensor_valid(output_tensor)) {
         tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
         tensor_destroy(output_tensor);
@@ -83,11 +51,22 @@ int image_vitmat_predict(ViTMatte *net, char *input_filename, char *output_filen
     argv[0] = input_tensor ;
     TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
 
-    // TENSOR *xxxx_test = net->get_output_tensor("pad2d");
-    // if (tensor_valid(xxxx_test)) {
-    //     tensor_show("********************** pad2d", xxxx_test);
-    //     tensor_destroy(xxxx_test);
-    // }
+    TENSOR *xxxx_test = net->get_output_tensor("images");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** images", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("features");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** features", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("mask");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** mask", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
     if (tensor_valid(output_tensor)) {
         tensor_show("---- output_tensor", output_tensor);
 
